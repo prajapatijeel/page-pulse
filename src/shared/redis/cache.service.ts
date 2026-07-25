@@ -4,24 +4,17 @@
  * ============================================================
  *
  * WHY THIS FILE EXISTS:
- * Generic, reusable cache abstraction over the raw Redis client.
- * Decouples all application-level caching logic from direct Redis library calls.
- * AuditService (and any future service) never touches Redis directly.
+ * High-level caching service abstracting raw Redis commands.
+ * Handles serialization/deserialization, TTL enforcement, and structured event logging.
  *
  * RESPONSIBILITY:
- * - `get<T>(key)`: Retrieve and deserialize a cached value. Returns `null` on miss or Redis-down.
- * - `set<T>(key, value, ttlSeconds)`: Serialize and store a value with TTL expiry.
- * - `delete(key)`: Remove a cached entry.
- * - `exists(key)`: Check if a key exists.
- * - All methods gracefully handle Redis-unavailable scenarios (returns safe defaults).
+ * - `get<T>(key)`: Fetch and parse JSON cached object. Logs `Cache HIT` or `Cache MISS`.
+ * - `set<T>(key, value, ttl)`: Stringify and persist object in Redis with TTL. Logs `Cache SET`.
+ * - `delete(key)` / `del(key)`: Invalidate cache key. Logs `Cache DELETE`.
+ * - `exists(key)`: Check key presence in Redis.
  *
  * ARCHITECTURE PLACEMENT:
- * Lives in src/shared/redis/ — globally available via RedisModule.
- *
- * DESIGN DECISIONS:
- * - JSON serialization/deserialization for complex objects.
- * - Silent failure mode: when Redis is down, get() returns null, set() is a no-op.
- *   This ensures local development without Redis works seamlessly.
+ * Lives in src/shared/redis/ — consumed by domain services (`AuditService`).
  * ============================================================
  */
 
@@ -37,30 +30,34 @@ export class CacheService {
 
   /**
    * Retrieve a cached value by key.
-   * Returns null on cache miss or if Redis is unavailable.
+   * Logs "Cache HIT" or "Cache MISS".
+   * Returns null on miss or if Redis is disconnected.
    */
   async get<T>(key: string): Promise<T | null> {
     try {
       if (!this.isConnected()) {
+        this.logger.debug(`Cache MISS for key: ${key} (Redis client offline)`);
         return null;
       }
 
       const raw = await this.redisClient.get(key);
       if (!raw) {
+        this.logger.log(`Cache MISS for key: ${key}`);
         return null;
       }
 
+      this.logger.log(`Cache HIT for key: ${key}`);
       return JSON.parse(raw) as T;
     } catch (error: unknown) {
       const err = error as Error;
-      this.logger.warn(`Cache GET failed for key "${key}": ${err.message}`);
+      this.logger.warn(`Cache GET error for key "${key}": ${err.message}`);
       return null;
     }
   }
 
   /**
    * Store a value in cache with a TTL (time-to-live) in seconds.
-   * Silently fails if Redis is unavailable.
+   * Logs "Cache SET".
    */
   async set<T>(key: string, value: T, ttlSeconds: number): Promise<void> {
     try {
@@ -70,14 +67,16 @@ export class CacheService {
 
       const serialized = JSON.stringify(value);
       await this.redisClient.setEx(key, ttlSeconds, serialized);
+      this.logger.log(`Cache SET for key: ${key} (TTL: ${ttlSeconds}s)`);
     } catch (error: unknown) {
       const err = error as Error;
-      this.logger.warn(`Cache SET failed for key "${key}": ${err.message}`);
+      this.logger.warn(`Cache SET error for key "${key}": ${err.message}`);
     }
   }
 
   /**
    * Delete a cached entry by key.
+   * Logs "Cache DELETE".
    */
   async delete(key: string): Promise<void> {
     try {
@@ -86,14 +85,22 @@ export class CacheService {
       }
 
       await this.redisClient.del(key);
+      this.logger.log(`Cache DELETE for key: ${key}`);
     } catch (error: unknown) {
       const err = error as Error;
-      this.logger.warn(`Cache DELETE failed for key "${key}": ${err.message}`);
+      this.logger.warn(`Cache DELETE error for key "${key}": ${err.message}`);
     }
   }
 
   /**
-   * Check if a key exists in the cache.
+   * Alias for delete(key).
+   */
+  async del(key: string): Promise<void> {
+    return this.delete(key);
+  }
+
+  /**
+   * Check if a key exists in Redis.
    */
   async exists(key: string): Promise<boolean> {
     try {
@@ -105,13 +112,13 @@ export class CacheService {
       return result === 1;
     } catch (error: unknown) {
       const err = error as Error;
-      this.logger.warn(`Cache EXISTS failed for key "${key}": ${err.message}`);
+      this.logger.warn(`Cache EXISTS error for key "${key}": ${err.message}`);
       return false;
     }
   }
 
   /**
-   * Check if Redis client is connected and ready.
+   * Check if Redis client is connected and open.
    */
   private isConnected(): boolean {
     return this.redisClient?.isOpen ?? false;
