@@ -15,11 +15,11 @@ export class AppConfigService {
   constructor(private readonly configService: ConfigService) {}
 
   get port(): number {
-    return this.configService.get<number>('appConfig.app.port', 3000);
+    return this.configService.getOrThrow<number>('appConfig.app.port');
   }
 
   get nodeEnv(): Environment {
-    return this.configService.get<Environment>('appConfig.app.nodeEnv', 'development');
+    return this.configService.getOrThrow<Environment>('appConfig.app.nodeEnv');
   }
 
   get isDevelopment(): boolean {
@@ -39,45 +39,26 @@ export class AppConfigService {
   }
 
   get database(): DatabaseConfig {
-    return this.configService.get<DatabaseConfig>('appConfig.database', {
-      host: 'localhost',
-      port: 5432,
-      name: 'page_pulse_db',
-      user: 'postgres',
-      password: 'postgres',
-    });
+    return this.configService.getOrThrow<DatabaseConfig>('appConfig.database');
   }
 
   get redis(): RedisConfig {
-    return this.configService.get<RedisConfig>('appConfig.redis', {
-      host: 'localhost',
-      port: 6379,
-    });
+    return this.configService.getOrThrow<RedisConfig>('appConfig.redis');
   }
 
   get cache(): CacheConfig {
-    return this.configService.get<CacheConfig>('appConfig.cache', {
-      ttl: 60,
-    });
+    return this.configService.getOrThrow<CacheConfig>('appConfig.cache');
   }
 
   get http(): HttpConfig {
-    return this.configService.get<HttpConfig>('appConfig.http', {
-      timeout: 5000,
-      maxConcurrentRequests: 100,
-    });
+    return this.configService.getOrThrow<HttpConfig>('appConfig.http');
   }
 
   get rateLimit(): RateLimitConfig {
-    return this.configService.get<RateLimitConfig>('appConfig.rateLimit', {
-      limit: 100,
-      ttl: 60,
-    });
+    return this.configService.getOrThrow<RateLimitConfig>('appConfig.rateLimit');
   }
 
   get log(): LogConfig {
-    return this.configService.get<LogConfig>('appConfig.log', {
-      level: 'info',
-    });
+    return this.configService.getOrThrow<LogConfig>('appConfig.log');
   }
 }
