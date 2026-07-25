@@ -4,32 +4,20 @@
  * ============================================================
  *
  * WHY THIS FILE EXISTS:
- * This is the data access layer for audit records. It encapsulates
- * every Sequelize operation behind clean method signatures so the
- * service layer never touches ORM-specific APIs directly.
- *
- * WHY THIS PATTERN MATTERS:
- * If you ever swap Sequelize for Prisma, TypeORM, Drizzle, or raw SQL,
- * you change ONE file (this repository) instead of rewriting every
- * service that queries audit records. The service layer depends on
- * method contracts, not ORM implementation details.
+ * Data access layer for audit records. Encapsulates all Sequelize ORM operations.
+ * Isolates SQL/ORM implementation details from the service layer.
  *
  * RESPONSIBILITY:
- * - create(): Persist a new audit record.
- * - findById(): Retrieve a single audit by UUID.
- * - findAll(): Retrieve all audit records.
+ * - `create()`: Persist a new audit record (initial PENDING state).
+ * - `update()`: Update audit record status, HTTP metrics, or error fields after execution.
+ * - `findById()`: Retrieve an audit by primary key (UUID).
+ * - `findAll()`: Retrieve all audit records ordered by creation timestamp.
  *
  * ARCHITECTURE PLACEMENT:
- * Lives in src/modules/audit/repositories/ — the data access sublayer
- * of the audit vertical slice, sitting between the model (raw ORM) and
- * the service (business logic).
+ * Lives in src/modules/audit/repositories/ — used by `AuditService`.
  *
  * FUTURE PREPARATION:
- * - Pagination (findAll with limit/offset/cursor).
- * - Filtering (findByStatus, findByUrl, findByDateRange).
- * - Ordering (sortBy createdAt, status).
- * - Bulk operations (createMany, updateManyStatuses).
- * - Complex joins when associations are added.
+ * - Query filters, pagination, and transactional updates will be added here.
  * ============================================================
  */
 
@@ -47,6 +35,14 @@ export class AuditRepository {
 
   async create(url: string, status: AuditStatus = AuditStatus.PENDING): Promise<Audit> {
     return this.auditModel.create({ url, status });
+  }
+
+  async update(id: string, updateData: Partial<Audit>): Promise<Audit | null> {
+    const audit = await this.auditModel.findByPk(id);
+    if (!audit) {
+      return null;
+    }
+    return audit.update(updateData);
   }
 
   async findById(id: string): Promise<Audit | null> {

@@ -4,36 +4,39 @@
  * ============================================================
  *
  * WHY THIS FILE EXISTS:
- * This is the NestJS module registration for the audit feature.
- * It wires together every layer of the audit vertical slice:
- *   - SequelizeModule.forFeature([Audit]) → registers the model with the ORM.
- *   - controllers: [AuditController] → exposes HTTP routes.
- *   - providers: [AuditService, AuditRepository] → makes them injectable.
+ * NestJS feature module wiring together every component of the audit slice:
+ * - `SequelizeModule.forFeature([Audit])` for database access.
+ * - `HttpModule` for Axios HTTP client integration.
+ * - Providers: `AuditService`, `AuditRepository`, `UrlFetcherService`.
+ * - Controller: `AuditController`.
  *
  * RESPONSIBILITY:
- * - Declare all audit-specific dependencies in one place.
- * - Imported by AppModule to activate the entire feature.
+ * Encapsulate audit domain dependencies into a clean module unit.
  *
  * ARCHITECTURE PLACEMENT:
- * Root of src/modules/audit/ — the module boundary file that NestJS
- * uses to understand what this feature slice provides and consumes.
- *
- * FUTURE PREPARATION:
- * - Additional providers (AuditFetcher, AuditParser) will be added here.
- * - Exports array will expose AuditService to other modules if needed.
+ * Root of src/modules/audit/ — imported by `AppModule`.
  * ============================================================
  */
 
 import { Module } from '@nestjs/common';
+import { HttpModule } from '@nestjs/axios';
 import { SequelizeModule } from '@nestjs/sequelize';
 import { Audit } from './models/audit.model.js';
 import { AuditController } from './controllers/audit.controller.js';
 import { AuditService } from './services/audit.service.js';
 import { AuditRepository } from './repositories/audit.repository.js';
+import { UrlFetcherService } from './services/url-fetcher.service.js';
 
 @Module({
-  imports: [SequelizeModule.forFeature([Audit])],
+  imports: [
+    SequelizeModule.forFeature([Audit]),
+    HttpModule.register({
+      timeout: 5000,
+      maxRedirects: 5,
+    }),
+  ],
   controllers: [AuditController],
-  providers: [AuditService, AuditRepository],
+  providers: [AuditService, AuditRepository, UrlFetcherService],
+  exports: [AuditService, AuditRepository, UrlFetcherService],
 })
 export class AuditModule {}

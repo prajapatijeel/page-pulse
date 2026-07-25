@@ -13,6 +13,9 @@ export function createSequelizeOptions(configService: AppConfigService): Sequeli
     database: db.name,
     autoLoadModels: true,
     synchronize: configService.isDevelopment,
+    sync: {
+      alter: configService.isDevelopment,
+    },
     logging: configService.isDevelopment ? console.log : false,
     pool: {
       max: 20,

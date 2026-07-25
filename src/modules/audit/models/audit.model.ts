@@ -4,36 +4,21 @@
  * ============================================================
  *
  * WHY THIS FILE EXISTS:
- * This is the ORM representation of the `audits` PostgreSQL table.
- * Every row in that table maps 1:1 to an instance of this class.
- * Sequelize uses the decorators below to generate SQL DDL, handle
- * CRUD operations, and enforce data types at the database level.
+ * Object-Relational Mapping (ORM) entity representing the `audits` table in PostgreSQL.
+ * Maps TypeScript properties to relational table columns.
  *
  * RESPONSIBILITY:
- * - Define the database schema for audit records.
- * - Provide the mapping between TypeScript properties and PostgreSQL columns.
- * - Serve as the single source of truth for the audit table structure.
- *
- * FIELDS (Milestone 1):
- * ┌────────────┬──────────────────┬─────────────────────────────────────┐
- * │ Column     │ Type             │ Constraints                         │
- * ├────────────┼──────────────────┼─────────────────────────────────────┤
- * │ id         │ UUID             │ PK, auto-generated (UUIDV4)         │
- * │ url        │ STRING(2048)     │ NOT NULL                            │
- * │ status     │ ENUM             │ NOT NULL, default: PENDING          │
- * │ createdAt  │ DATE             │ auto-managed by Sequelize           │
- * │ updatedAt  │ DATE             │ auto-managed by Sequelize           │
- * └────────────┴──────────────────┴─────────────────────────────────────┘
+ * - Define database table schema for audit execution records.
+ * - Store initial request attributes (`id`, `url`, `status`) and execution metrics
+ *   (`statusCode`, `statusText`, `responseTime`, `finalUrl`, `errorMessage`, `failureReason`).
  *
  * ARCHITECTURE PLACEMENT:
- * Lives in src/modules/audit/models/ — the data access layer of the
- * audit vertical slice. The repository consumes this model; the service
- * never imports it directly (it talks through the repository abstraction).
+ * Lives in src/modules/audit/models/ — consumed exclusively by `AuditRepository`.
+ * Services do not query ORM model methods directly.
  *
  * FUTURE PREPARATION:
- * - Additional columns (statusCode, responseTimeMs, htmlSnapshot,
- *   errorMessage, headers) will be added here in later milestones.
- * - Associations (e.g., BelongsTo User) will be declared here.
+ * - HTML body snapshot and page metadata columns (title, description, meta tags)
+ *   will be added in future milestones.
  * ============================================================
  */
 
@@ -63,4 +48,40 @@ export class Audit extends Model {
     allowNull: false,
   })
   declare status: AuditStatus;
+
+  @Column({
+    type: DataType.INTEGER,
+    allowNull: true,
+  })
+  declare statusCode?: number | null;
+
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+  })
+  declare statusText?: string | null;
+
+  @Column({
+    type: DataType.INTEGER,
+    allowNull: true,
+  })
+  declare responseTime?: number | null;
+
+  @Column({
+    type: DataType.STRING(2048),
+    allowNull: true,
+  })
+  declare finalUrl?: string | null;
+
+  @Column({
+    type: DataType.TEXT,
+    allowNull: true,
+  })
+  declare errorMessage?: string | null;
+
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+  })
+  declare failureReason?: string | null;
 }
