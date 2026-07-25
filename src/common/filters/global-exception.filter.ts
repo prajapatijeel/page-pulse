@@ -27,13 +27,17 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     let message = 'An error occurred';
     let error = 'Internal Server Error';
+    let extraFields: Record<string, unknown> = {};
 
     if (typeof exceptionResponse === 'string') {
       message = exceptionResponse;
     } else if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
-      const resObj = exceptionResponse as Record<string, unknown>;
+      const resObj = { ...(exceptionResponse as Record<string, unknown>) };
       message = (resObj.message as string) || message;
       error = (resObj.error as string) || error;
+      delete resObj.message;
+      delete resObj.error;
+      extraFields = resObj;
     }
 
     if (status >= 500) {
@@ -58,6 +62,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       path: request.url,
       requestId,
+      ...extraFields,
     });
   }
 }

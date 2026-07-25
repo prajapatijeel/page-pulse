@@ -59,6 +59,11 @@ export class EnvironmentVariables {
   REQUEST_TIMEOUT: number = 5000;
 
   @Type(() => Number)
+  @IsNumber({}, { message: 'AUDIT_REQUEST_TIMEOUT must be a valid number' })
+  @Min(0, { message: 'AUDIT_REQUEST_TIMEOUT cannot be negative' })
+  AUDIT_REQUEST_TIMEOUT: number = 10000;
+
+  @Type(() => Number)
   @IsNumber({}, { message: 'MAX_CONCURRENT_REQUESTS must be a valid number' })
   @Min(1, { message: 'MAX_CONCURRENT_REQUESTS must be at least 1' })
   MAX_CONCURRENT_REQUESTS: number = 100;

@@ -21,7 +21,10 @@ export default registerAs('appConfig', (): AppConfiguration => ({
     ttl: parseInt(process.env.CACHE_TTL || '60', 10),
   },
   http: {
-    timeout: parseInt(process.env.REQUEST_TIMEOUT || '5000', 10),
+    timeout: parseInt(
+      process.env.AUDIT_REQUEST_TIMEOUT || process.env.REQUEST_TIMEOUT || '10000',
+      10,
+    ),
     maxConcurrentRequests: parseInt(process.env.MAX_CONCURRENT_REQUESTS || '100', 10),
   },
   rateLimit: {

@@ -23,8 +23,8 @@
 
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { Audit } from '../models/audit.model.js';
-import { AuditStatus } from '../constants/audit-status.enum.js';
+import { Audit } from '../models/audit.model';
+import { AuditStatus } from '../constants/audit-status.enum';
 
 @Injectable()
 export class AuditRepository {

@@ -5,27 +5,14 @@
  *
  * WHY THIS FILE EXISTS:
  * Encapsulates all HTTP network execution, latency measurement, redirect following,
- * and error handling for URL auditing.
- *
- * SEPARATION OF CONCERNS:
- * No database code, no controller code, no business domain logic lives here.
- * This service has ONE job: take a URL, fetch it over HTTP/HTTPS, measure execution metrics,
- * handle network faults, and return a structured `UrlFetchResult`.
+ * and structured network error categorization.
  *
  * RESPONSIBILITY:
  * - Execute HTTP GET request using HttpService (Axios).
- * - Measure latency in milliseconds using `performance.now()`.
- * - Follow up to 5 redirects and capture `finalUrl`.
- * - Set `validateStatus: () => true` so HTTP 4xx/5xx responses are captured cleanly.
- * - Map network failures (timeouts, DNS lookup errors, SSL failures, ECONNREFUSED)
- *   to application-level failure reasons.
- * - Return raw HTML payload for future parsing.
- *
- * ARCHITECTURE PLACEMENT:
- * Lives in src/modules/audit/services/ — injected into `AuditService`.
- *
- * FUTURE PREPARATION:
- * - Will pass `htmlContent` to HTML metadata & SEO parser services in Milestone 3.
+ * - Measure execution latency in milliseconds (`performance.now()`).
+ * - Respect configurable timeout from `AUDIT_REQUEST_TIMEOUT` env.
+ * - Categorize network failures (Timeout, DNS, SSL, Refused, Network Unreachable, Too Many Redirects).
+ * - Return structured `UrlFetchResult`.
  * ============================================================
  */
 
@@ -34,7 +21,7 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { AxiosError, AxiosResponse } from 'axios';
 import { AppConfigService } from '@config/app-config.service';
-import { UrlFetchResult } from '../interfaces/url-fetch-result.interface.js';
+import { UrlFetchResult } from '../interfaces/url-fetch-result.interface';
 
 @Injectable()
 export class UrlFetcherService {
@@ -54,7 +41,7 @@ export class UrlFetcherService {
         this.httpService.get<string>(targetUrl, {
           timeout,
           maxRedirects: 5,
-          validateStatus: () => true, // Accept all HTTP status codes (2xx, 3xx, 4xx, 5xx)
+          validateStatus: () => true, // Capture all HTTP status codes (2xx, 3xx, 4xx, 5xx)
           headers: {
             'User-Agent': 'PagePulse-AuditBot/1.0 (+https://pagepulse.io)',
             Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -66,7 +53,6 @@ export class UrlFetcherService {
       const endTime = performance.now();
       const responseTime = Math.round(endTime - startTime);
 
-      // Extract final URL after redirects if available
       const finalUrl =
         (response.request as { res?: { responseUrl?: string } })?.res?.responseUrl ?? targetUrl;
 
@@ -103,14 +89,11 @@ export class UrlFetcherService {
       code === 'ETIMEDOUT' ||
       message.toLowerCase().includes('timeout')
     ) {
-      errorMessage = 'Connection timeout';
+      errorMessage = 'Request timed out';
       failureReason = 'TIMEOUT';
     } else if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
       errorMessage = 'DNS resolution failed';
       failureReason = 'DNS_FAILURE';
-    } else if (code === 'ECONNREFUSED' || code === 'ECONNRESET' || code === 'EHOSTUNREACH') {
-      errorMessage = 'Connection refused by server';
-      failureReason = 'CONNECTION_REFUSED';
     } else if (
       code === 'DEPTH_ZERO_SELF_SIGNED_CERT' ||
       code === 'CERT_HAS_EXPIRED' ||
@@ -118,8 +101,17 @@ export class UrlFetcherService {
       message.toLowerCase().includes('ssl') ||
       message.toLowerCase().includes('certificate')
     ) {
-      errorMessage = 'SSL certificate error';
+      errorMessage = 'Invalid SSL certificate';
       failureReason = 'SSL_ERROR';
+    } else if (code === 'ECONNREFUSED' || code === 'ECONNRESET') {
+      errorMessage = 'Connection refused';
+      failureReason = 'CONNECTION_REFUSED';
+    } else if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH') {
+      errorMessage = 'Network unreachable';
+      failureReason = 'NETWORK_UNREACHABLE';
+    } else if (code === 'ERR_TOO_MANY_REDIRECTS' || message.toLowerCase().includes('redirect')) {
+      errorMessage = 'Too many redirects';
+      failureReason = 'TOO_MANY_REDIRECTS';
     } else {
       errorMessage = message;
       failureReason = code ?? 'UNKNOWN_ERROR';

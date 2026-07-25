@@ -18,7 +18,7 @@
  */
 
 import { Column, DataType, Default, Model, PrimaryKey, Table } from 'sequelize-typescript';
-import { AuditStatus } from '../constants/audit-status.enum.js';
+import { AuditStatus } from '../constants/audit-status.enum';
 
 @Table({
   tableName: 'audits',

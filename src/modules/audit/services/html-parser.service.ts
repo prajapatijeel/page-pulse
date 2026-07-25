@@ -27,7 +27,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import * as cheerio from 'cheerio';
-import { ParsedMetadata } from '../interfaces/parsed-metadata.interface.js';
+import { ParsedMetadata } from '../interfaces/parsed-metadata.interface';
 
 @Injectable()
 export class HtmlParserService {
