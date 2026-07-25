@@ -1,0 +1,23 @@
+# Dependencies
+node_modules
+npm-debug.log*
+
+# Build outputs
+dist
+coverage
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Version control & IDE
+.git
+.gitignore
+.husky
+.idea
+.vscode
+
+# Documentation & Scratch
+*.md
