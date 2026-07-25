@@ -12,7 +12,7 @@ export function createSequelizeOptions(configService: AppConfigService): Sequeli
     password: db.password,
     database: db.name,
     autoLoadModels: true,
-    synchronize: false,
+    synchronize: configService.isDevelopment,
     logging: configService.isDevelopment ? console.log : false,
     pool: {
       max: 20,
