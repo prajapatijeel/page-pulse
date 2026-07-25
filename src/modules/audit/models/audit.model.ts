@@ -5,20 +5,15 @@
  *
  * WHY THIS FILE EXISTS:
  * Object-Relational Mapping (ORM) entity representing the `audits` table in PostgreSQL.
- * Maps TypeScript properties to relational table columns.
  *
  * RESPONSIBILITY:
  * - Define database table schema for audit execution records.
- * - Store initial request attributes (`id`, `url`, `status`) and execution metrics
- *   (`statusCode`, `statusText`, `responseTime`, `finalUrl`, `errorMessage`, `failureReason`).
+ * - Store request attributes (`id`, `url`, `status`), execution metrics (`statusCode`,
+ *   `statusText`, `responseTime`, `finalUrl`, `errorMessage`, `failureReason`), and HTML metadata
+ *   (`title`, `description`, `contentLength`, `https`).
  *
  * ARCHITECTURE PLACEMENT:
- * Lives in src/modules/audit/models/ — consumed exclusively by `AuditRepository`.
- * Services do not query ORM model methods directly.
- *
- * FUTURE PREPARATION:
- * - HTML body snapshot and page metadata columns (title, description, meta tags)
- *   will be added in future milestones.
+ * Lives in src/modules/audit/models/ — used by `AuditRepository`.
  * ============================================================
  */
 
@@ -72,6 +67,30 @@ export class Audit extends Model {
     allowNull: true,
   })
   declare finalUrl?: string | null;
+
+  @Column({
+    type: DataType.STRING(1024),
+    allowNull: true,
+  })
+  declare title?: string | null;
+
+  @Column({
+    type: DataType.TEXT,
+    allowNull: true,
+  })
+  declare description?: string | null;
+
+  @Column({
+    type: DataType.INTEGER,
+    allowNull: true,
+  })
+  declare contentLength?: number | null;
+
+  @Column({
+    type: DataType.BOOLEAN,
+    allowNull: true,
+  })
+  declare https?: boolean | null;
 
   @Column({
     type: DataType.TEXT,

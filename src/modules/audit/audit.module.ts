@@ -7,14 +7,11 @@
  * NestJS feature module wiring together every component of the audit slice:
  * - `SequelizeModule.forFeature([Audit])` for database access.
  * - `HttpModule` for Axios HTTP client integration.
- * - Providers: `AuditService`, `AuditRepository`, `UrlFetcherService`.
+ * - Providers: `AuditService`, `AuditRepository`, `UrlFetcherService`, `HtmlParserService`.
  * - Controller: `AuditController`.
  *
  * RESPONSIBILITY:
  * Encapsulate audit domain dependencies into a clean module unit.
- *
- * ARCHITECTURE PLACEMENT:
- * Root of src/modules/audit/ — imported by `AppModule`.
  * ============================================================
  */
 
@@ -26,6 +23,7 @@ import { AuditController } from './controllers/audit.controller.js';
 import { AuditService } from './services/audit.service.js';
 import { AuditRepository } from './repositories/audit.repository.js';
 import { UrlFetcherService } from './services/url-fetcher.service.js';
+import { HtmlParserService } from './services/html-parser.service.js';
 
 @Module({
   imports: [
@@ -36,7 +34,7 @@ import { UrlFetcherService } from './services/url-fetcher.service.js';
     }),
   ],
   controllers: [AuditController],
-  providers: [AuditService, AuditRepository, UrlFetcherService],
-  exports: [AuditService, AuditRepository, UrlFetcherService],
+  providers: [AuditService, AuditRepository, UrlFetcherService, HtmlParserService],
+  exports: [AuditService, AuditRepository, UrlFetcherService, HtmlParserService],
 })
 export class AuditModule {}

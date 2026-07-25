@@ -4,33 +4,12 @@
  * ============================================================
  *
  * WHY THIS FILE EXISTS:
- * This is the HTTP route handler for audit endpoints. It is the
- * thinnest possible layer — its only job is to:
- *   1. Declare the HTTP method and route.
- *   2. Accept the validated request body (DTO).
- *   3. Delegate to the service.
- *   4. Return the service response with the correct HTTP status code.
- *
- * ZERO BUSINESS LOGIC lives here. If you see an `if` statement,
- * a database call, or a try/catch in a controller, something is wrong.
+ * Thin HTTP route handler for URL audit endpoints. Accepts request payloads,
+ * delegates to `AuditService`, and returns structured API responses.
  *
  * RESPONSIBILITY:
- * - POST /api/v1/audit → AuditService.createAudit() → 201 Created
- *
- * ARCHITECTURE PLACEMENT:
- * Lives in src/modules/audit/controllers/ — the HTTP sublayer of the
- * audit vertical slice. NestJS routes incoming requests to these methods
- * based on decorators.
- *
- * SWAGGER ANNOTATIONS:
- * Every endpoint is documented with @ApiTags, @ApiOperation, @ApiBody,
- * and @ApiResponse so the Swagger UI at /api/docs is always accurate.
- *
- * FUTURE PREPARATION:
- * - GET /api/v1/audit/:id (retrieve single audit)
- * - GET /api/v1/audit (list all audits with pagination)
- * - DELETE /api/v1/audit/:id (remove audit record)
- * - All added to this controller, each as a one-liner delegating to the service.
+ * - POST /api/v1/audit → AuditService.createAudit() → 201 Created / 400 Bad Request
+ * - Expose Swagger documentation annotations.
  * ============================================================
  */
 
@@ -47,11 +26,15 @@ export class AuditController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Create a new URL audit',
-    description: 'Accepts a URL and creates a new audit record with PENDING status.',
+    summary: 'Audit a URL',
+    description:
+      'Fetches the specified URL, measures latency, follows redirects, parses HTML metadata (title, description, content length, HTTPS), and persists audit metrics.',
   })
   @ApiBody({ type: CreateAuditDto })
-  @ApiResponse({ status: 201, description: 'Audit request accepted and record created.' })
+  @ApiResponse({
+    status: 201,
+    description: 'Audit completed or failed successfully with execution metadata.',
+  })
   @ApiResponse({ status: 400, description: 'Validation failed — invalid or missing URL.' })
   async createAudit(@Body() dto: CreateAuditDto) {
     return this.auditService.createAudit(dto);
