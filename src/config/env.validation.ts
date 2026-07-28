@@ -64,6 +64,16 @@ export class EnvironmentVariables {
   AUDIT_REQUEST_TIMEOUT: number = 10000;
 
   @Type(() => Number)
+  @IsNumber({}, { message: 'AUDIT_MAX_CONCURRENT must be a valid number' })
+  @Min(1, { message: 'AUDIT_MAX_CONCURRENT must be at least 1' })
+  AUDIT_MAX_CONCURRENT: number = 5;
+
+  @Type(() => Number)
+  @IsNumber({}, { message: 'AUDIT_MAX_QUEUE must be a valid number' })
+  @Min(1, { message: 'AUDIT_MAX_QUEUE must be at least 1' })
+  AUDIT_MAX_QUEUE: number = 100;
+
+  @Type(() => Number)
   @IsNumber({}, { message: 'MAX_CONCURRENT_REQUESTS must be a valid number' })
   @Min(1, { message: 'MAX_CONCURRENT_REQUESTS must be at least 1' })
   MAX_CONCURRENT_REQUESTS: number = 100;

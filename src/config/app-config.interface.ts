@@ -28,6 +28,11 @@ export interface HttpConfig {
   maxConcurrentRequests: number;
 }
 
+export interface AuditQueueConfig {
+  maxConcurrent: number;
+  maxQueue: number;
+}
+
 export interface RateLimitConfig {
   limit: number;
   ttl: number;
@@ -43,6 +48,7 @@ export interface AppConfiguration {
   redis: RedisConfig;
   cache: CacheConfig;
   http: HttpConfig;
+  auditQueue: AuditQueueConfig;
   rateLimit: RateLimitConfig;
   log: LogConfig;
 }

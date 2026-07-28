@@ -24,6 +24,7 @@ import { AuditService } from './services/audit.service.js';
 import { AuditRepository } from './repositories/audit.repository.js';
 import { UrlFetcherService } from './services/url-fetcher.service.js';
 import { HtmlParserService } from './services/html-parser.service.js';
+import { AuditQueueService } from './services/audit-queue.service.js';
 
 @Module({
   imports: [
@@ -34,7 +35,13 @@ import { HtmlParserService } from './services/html-parser.service.js';
     }),
   ],
   controllers: [AuditController],
-  providers: [AuditService, AuditRepository, UrlFetcherService, HtmlParserService],
-  exports: [AuditService, AuditRepository, UrlFetcherService, HtmlParserService],
+  providers: [
+    AuditService,
+    AuditRepository,
+    UrlFetcherService,
+    HtmlParserService,
+    AuditQueueService,
+  ],
+  exports: [AuditService, AuditRepository, UrlFetcherService, HtmlParserService, AuditQueueService],
 })
 export class AuditModule {}

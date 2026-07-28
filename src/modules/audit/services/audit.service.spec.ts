@@ -1,10 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { GatewayTimeoutException } from '@nestjs/common';
+import { GatewayTimeoutException, ServiceUnavailableException } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { AuditService, AuditSuccessData } from './audit.service';
 import { AuditRepository } from '../repositories/audit.repository';
 import { UrlFetcherService } from './url-fetcher.service';
 import { HtmlParserService } from './html-parser.service';
+import { AuditQueueService } from './audit-queue.service';
 import { CacheService } from '../../../shared/redis/cache.service';
 import { AppConfigService } from '../../../config/app-config.service';
 import { AuditStatus } from '../constants/audit-status.enum';
@@ -16,6 +17,7 @@ describe('AuditService', () => {
   let mockAuditRepository: { create: jest.Mock; update: jest.Mock };
   let mockUrlFetcherService: { fetchUrl: jest.Mock };
   let mockHtmlParserService: { parse: jest.Mock };
+  let mockAuditQueueService: { enqueue: jest.Mock; size: number; pending: number };
   let mockCacheService: { get: jest.Mock; set: jest.Mock };
   let mockConfigService: Partial<AppConfigService>;
 
@@ -51,6 +53,14 @@ describe('AuditService', () => {
       }),
     };
 
+    mockAuditQueueService = {
+      enqueue: jest.fn().mockImplementation(async (taskFn: () => Promise<unknown>) => {
+        return taskFn();
+      }),
+      size: 0,
+      pending: 1,
+    };
+
     mockCacheService = {
       get: jest.fn(),
       set: jest.fn(),
@@ -59,6 +69,7 @@ describe('AuditService', () => {
     mockConfigService = {
       cache: { ttl: 60 },
       http: { timeout: 10000, maxConcurrentRequests: 100 },
+      auditQueue: { maxConcurrent: 5, maxQueue: 100 },
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -71,6 +82,7 @@ describe('AuditService', () => {
         { provide: AuditRepository, useValue: mockAuditRepository },
         { provide: UrlFetcherService, useValue: mockUrlFetcherService },
         { provide: HtmlParserService, useValue: mockHtmlParserService },
+        { provide: AuditQueueService, useValue: mockAuditQueueService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: AppConfigService, useValue: mockConfigService },
       ],
@@ -83,8 +95,11 @@ describe('AuditService', () => {
     expect(service).toBeDefined();
   });
 
-  describe('createAudit - Cache Hit', () => {
-    it('should return cached response immediately without calling Axios or Database', async () => {
+  // ──────────────────────────────────────────────────────────
+  // Cache Hit — Queue Bypass
+  // ──────────────────────────────────────────────────────────
+  describe('createAudit - Cache Hit (Queue Bypass)', () => {
+    it('should return cached response immediately without entering the queue, calling Axios, or writing to the database', async () => {
       const cachedData: ApiResponse<AuditSuccessData> = {
         success: true,
         message: 'Audit completed successfully',
@@ -110,13 +125,17 @@ describe('AuditService', () => {
 
       expect(result.data.cached).toBe(true);
       expect(mockCacheService.get).toHaveBeenCalledTimes(1);
+      expect(mockAuditQueueService.enqueue).not.toHaveBeenCalled();
       expect(mockAuditRepository.create).not.toHaveBeenCalled();
       expect(mockUrlFetcherService.fetchUrl).not.toHaveBeenCalled();
     });
   });
 
-  describe('createAudit - Cache Miss & Successful Fetch', () => {
-    it('should fetch URL, parse HTML, update DB as COMPLETED, and store in Cache', async () => {
+  // ──────────────────────────────────────────────────────────
+  // Single Audit — Cache Miss → Queue → Execute
+  // ──────────────────────────────────────────────────────────
+  describe('createAudit - Single Audit (Cache Miss)', () => {
+    it('should enqueue, create DB record, fetch URL, parse HTML, update DB as COMPLETED, and store in cache', async () => {
       mockCacheService.get.mockResolvedValue(null);
       mockUrlFetcherService.fetchUrl.mockResolvedValue({
         success: true,
@@ -132,6 +151,15 @@ describe('AuditService', () => {
       expect(result.success).toBe(true);
       expect(result.data.status).toBe(AuditStatus.COMPLETED);
       expect(result.data.cached).toBe(false);
+
+      // Must go through queue
+      expect(mockAuditQueueService.enqueue).toHaveBeenCalledTimes(1);
+      expect(mockAuditQueueService.enqueue).toHaveBeenCalledWith(expect.any(Function), {
+        requestId: 'test-req-123',
+        url: 'https://example.com',
+      });
+
+      // DB record created INSIDE the queue task
       expect(mockAuditRepository.create).toHaveBeenCalledWith(
         'https://example.com',
         AuditStatus.PENDING,
@@ -152,8 +180,79 @@ describe('AuditService', () => {
     });
   });
 
-  describe('createAudit - Request Timeout', () => {
-    it('should update DB record as FAILED with TIMEOUT and throw GatewayTimeoutException (504)', async () => {
+  // ──────────────────────────────────────────────────────────
+  // Multiple Simultaneous Audits — Concurrency Control
+  // ──────────────────────────────────────────────────────────
+  describe('createAudit - Five Simultaneous Audits', () => {
+    it('should enqueue all five audits through the queue service', async () => {
+      mockCacheService.get.mockResolvedValue(null);
+      mockUrlFetcherService.fetchUrl.mockResolvedValue({
+        success: true,
+        statusCode: 200,
+        statusText: 'OK',
+        responseTime: 100,
+        finalUrl: 'https://example.com/',
+        htmlContent: '<html><title>Example</title></html>',
+      });
+
+      const urls = [
+        'https://example1.com',
+        'https://example2.com',
+        'https://example3.com',
+        'https://example4.com',
+        'https://example5.com',
+      ];
+
+      const results = await Promise.all(urls.map((url) => service.createAudit({ url })));
+
+      expect(results).toHaveLength(5);
+      results.forEach((result) => {
+        expect(result.success).toBe(true);
+        expect(result.data.status).toBe(AuditStatus.COMPLETED);
+      });
+
+      expect(mockAuditQueueService.enqueue).toHaveBeenCalledTimes(5);
+      expect(mockAuditRepository.create).toHaveBeenCalledTimes(5);
+      expect(mockUrlFetcherService.fetchUrl).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────
+  // Queue Overflow — HTTP 503
+  // ──────────────────────────────────────────────────────────
+  describe('createAudit - Queue Overflow (HTTP 503)', () => {
+    it('should throw ServiceUnavailableException when AuditQueueService reports queue full', async () => {
+      mockCacheService.get.mockResolvedValue(null);
+
+      // Simulate queue full by making enqueue throw 503
+      mockAuditQueueService.enqueue.mockRejectedValue(
+        new ServiceUnavailableException({
+          success: false,
+          statusCode: 503,
+          message: 'Audit service is currently busy. Please try again later.',
+          errorCode: 'AUDIT_QUEUE_FULL',
+        }),
+      );
+
+      await expect(service.createAudit({ url: 'https://example.com' })).rejects.toThrow(
+        ServiceUnavailableException,
+      );
+
+      // Cache was checked first
+      expect(mockCacheService.get).toHaveBeenCalledTimes(1);
+      // Enqueue was attempted
+      expect(mockAuditQueueService.enqueue).toHaveBeenCalledTimes(1);
+      // No DB record since queue rejected before execution
+      expect(mockAuditRepository.create).not.toHaveBeenCalled();
+      expect(mockUrlFetcherService.fetchUrl).not.toHaveBeenCalled();
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────
+  // Request Timeout — HTTP 504
+  // ──────────────────────────────────────────────────────────
+  describe('createAudit - Request Timeout (HTTP 504)', () => {
+    it('should update DB record as FAILED with TIMEOUT and throw GatewayTimeoutException', async () => {
       mockCacheService.get.mockResolvedValue(null);
       mockUrlFetcherService.fetchUrl.mockResolvedValue({
         success: false,
@@ -167,6 +266,8 @@ describe('AuditService', () => {
         GatewayTimeoutException,
       );
 
+      expect(mockAuditQueueService.enqueue).toHaveBeenCalledTimes(1);
+      expect(mockAuditRepository.create).toHaveBeenCalledTimes(1);
       expect(mockAuditRepository.update).toHaveBeenCalledWith(
         'test-audit-uuid-123',
         expect.objectContaining({
@@ -179,6 +280,9 @@ describe('AuditService', () => {
     });
   });
 
+  // ──────────────────────────────────────────────────────────
+  // Network Error — DNS Failure
+  // ──────────────────────────────────────────────────────────
   describe('createAudit - Network Error (DNS Failure)', () => {
     it('should update DB record as FAILED with DNS_FAILURE and return failed result without caching', async () => {
       mockCacheService.get.mockResolvedValue(null);
@@ -197,6 +301,7 @@ describe('AuditService', () => {
       if ('error' in result.data) {
         expect(result.data.error).toBe('DNS resolution failed');
       }
+      expect(mockAuditQueueService.enqueue).toHaveBeenCalledTimes(1);
       expect(mockAuditRepository.update).toHaveBeenCalledWith(
         'test-audit-uuid-123',
         expect.objectContaining({
@@ -205,6 +310,75 @@ describe('AuditService', () => {
         }),
       );
       expect(mockCacheService.set).not.toHaveBeenCalled();
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────
+  // Failed Audit — Slot Release Verification
+  // ──────────────────────────────────────────────────────────
+  describe('createAudit - Failed Audit Releases Queue Slot', () => {
+    it('should release concurrency slot after failure, allowing next queued request to proceed', async () => {
+      mockCacheService.get.mockResolvedValue(null);
+
+      // First call fails with timeout (throws → releases slot)
+      mockUrlFetcherService.fetchUrl
+        .mockResolvedValueOnce({
+          success: false,
+          responseTime: 10005,
+          finalUrl: 'https://slow-site.com',
+          errorMessage: 'Request timed out',
+          failureReason: 'TIMEOUT',
+        })
+        // Second call succeeds
+        .mockResolvedValueOnce({
+          success: true,
+          statusCode: 200,
+          statusText: 'OK',
+          responseTime: 100,
+          finalUrl: 'https://fast-site.com/',
+          htmlContent: '<html><title>Fast</title></html>',
+        });
+
+      // First audit fails
+      await expect(service.createAudit({ url: 'https://slow-site.com' })).rejects.toThrow(
+        GatewayTimeoutException,
+      );
+
+      // Second audit succeeds (slot was released)
+      const result = await service.createAudit({ url: 'https://fast-site.com' });
+
+      expect(result.success).toBe(true);
+      expect(result.data.status).toBe(AuditStatus.COMPLETED);
+
+      // Both went through the queue
+      expect(mockAuditQueueService.enqueue).toHaveBeenCalledTimes(2);
+      // Both created DB records
+      expect(mockAuditRepository.create).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────
+  // Deferred DB Record — No Record Until Slot Acquired
+  // ──────────────────────────────────────────────────────────
+  describe('createAudit - Deferred DB Record Creation', () => {
+    it('should NOT create a DB record if the queue rejects the request (503)', async () => {
+      mockCacheService.get.mockResolvedValue(null);
+      mockAuditQueueService.enqueue.mockRejectedValue(
+        new ServiceUnavailableException({
+          success: false,
+          statusCode: 503,
+          message: 'Audit service is currently busy. Please try again later.',
+          errorCode: 'AUDIT_QUEUE_FULL',
+        }),
+      );
+
+      await expect(service.createAudit({ url: 'https://example.com' })).rejects.toThrow(
+        ServiceUnavailableException,
+      );
+
+      // DB record is never created since queue rejected before execution
+      expect(mockAuditRepository.create).not.toHaveBeenCalled();
+      expect(mockAuditRepository.update).not.toHaveBeenCalled();
     });
   });
 });

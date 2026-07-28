@@ -18,7 +18,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
-    const requestId = (request.headers[REQUEST_ID_HEADER] as string) || 'N/A';
+    const requestId = request.requestId || (request.headers[REQUEST_ID_HEADER] as string) || 'N/A';
     const status =
       exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
 
@@ -41,17 +41,30 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
 
     if (status >= 500) {
+      const message = exception instanceof Error ? exception.message : String(exception);
+      const stack = exception instanceof Error ? exception.stack : undefined;
       this.logger.error(
-        `[${requestId}] ${request.method} ${request.url} - ${status} - Error: ${
-          exception instanceof Error ? exception.message : String(exception)
-        }`,
-        exception instanceof Error ? exception.stack : undefined,
+        JSON.stringify({
+          event: 'Unhandled exception',
+          requestId,
+          method: request.method,
+          url: request.url,
+          statusCode: status,
+          message,
+          stack,
+        }),
+        stack,
       );
     } else {
       this.logger.warn(
-        `[${requestId}] ${request.method} ${request.url} - ${status} - Message: ${JSON.stringify(
+        JSON.stringify({
+          event: 'Request failed',
+          requestId,
+          method: request.method,
+          url: request.url,
+          statusCode: status,
           message,
-        )}`,
+        }),
       );
     }
 

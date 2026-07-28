@@ -27,6 +27,10 @@ export default registerAs('appConfig', (): AppConfiguration => ({
     ),
     maxConcurrentRequests: parseInt(process.env.MAX_CONCURRENT_REQUESTS || '100', 10),
   },
+  auditQueue: {
+    maxConcurrent: parseInt(process.env.AUDIT_MAX_CONCURRENT || '5', 10),
+    maxQueue: parseInt(process.env.AUDIT_MAX_QUEUE || '100', 10),
+  },
   rateLimit: {
     limit: parseInt(process.env.RATE_LIMIT_LIMIT || '100', 10),
     ttl: parseInt(process.env.RATE_LIMIT_TTL || '60', 10),

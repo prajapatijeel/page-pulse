@@ -41,6 +41,10 @@ export class AuditController {
     description:
       'Gateway Timeout — target website failed to respond within the configured timeout.',
   })
+  @ApiResponse({
+    status: 503,
+    description: 'Service Unavailable — audit queue is full. Try again later.',
+  })
   async createAudit(@Body() dto: CreateAuditDto) {
     return this.auditService.createAudit(dto);
   }

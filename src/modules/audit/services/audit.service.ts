@@ -8,40 +8,45 @@
  *
  * RESPONSIBILITIES & FLOW:
  * 1. Check Redis for a cached response using normalized URL key.
- *    - CACHE HIT: Return cached payload immediately (`cached: true`). Bypasses network & DB.
- * 2. Create initial database record (`status = PENDING`).
- * 3. Log `Audit Started` and `Request Sent`.
- * 4. Execute HTTP fetch via `UrlFetcherService` (configurable timeout via `AUDIT_REQUEST_TIMEOUT`).
- * 5. On Successful Fetch:
- *    - Parse HTML metadata (`title`, `description`, `contentLength`, `https`) via `HtmlParserService`.
- *    - Persist `COMPLETED` audit record with HTTP metrics and metadata in PostgreSQL.
- *    - Store in Redis cache with `CACHE_TTL`.
- *    - Log `Request Completed`.
- *    - Return 201 Created payload (`cached: false`).
- * 6. On Request Timeout (`failureReason === 'TIMEOUT'`):
- *    - Log `Request Timed Out`.
- *    - Persist `status = FAILED`, `failureReason = TIMEOUT`, `errorMessage = Request timed out`, `responseTime` in DB.
- *    - Throw NestJS `GatewayTimeoutException` (HTTP 504) returning structured error response.
- * 7. On Other Network Failure (DNS, SSL, Connection Refused, Network Unreachable, Redirects):
- *    - Log `Audit Failed`.
- *    - Persist `status = FAILED` with categorized `failureReason` and `errorMessage` in DB.
- *    - Return structured error payload (`cached: false`).
+ *    - CACHE HIT: Return cached payload immediately (`cached: true`).
+ *      Bypasses queue, network, and DB entirely.
+ * 2. Enqueue the audit execution via `AuditQueueService`.
+ *    - If the queue is full, AuditQueueService throws HTTP 503.
+ *    - The request waits until a concurrency slot becomes available.
+ * 3. INSIDE the queued task (after acquiring a worker slot):
+ *    a. Create initial database record (`status = PENDING`).
+ *    b. Execute HTTP fetch via `UrlFetcherService`.
+ *    c. On Successful Fetch:
+ *       - Parse HTML metadata via `HtmlParserService`.
+ *       - Persist `COMPLETED` audit record in PostgreSQL.
+ *       - Store in Redis cache with `CACHE_TTL`.
+ *       - Log `Audit Completed`.
+ *       - Return 201 Created payload (`cached: false`).
+ *    d. On Request Timeout (`failureReason === 'TIMEOUT'`):
+ *       - Persist `status = FAILED`, `failureReason = TIMEOUT` in DB.
+ *       - Throw NestJS `GatewayTimeoutException` (HTTP 504).
+ *    e. On Other Network Failure:
+ *       - Persist `status = FAILED` with categorized `failureReason` in DB.
+ *       - Return structured error payload (`cached: false`).
+ * 4. On any exception, the concurrency slot is automatically released
+ *    so remaining queued requests continue processing.
  * ============================================================
  */
 
 import { GatewayTimeoutException, Inject, Injectable, Logger, Scope } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import type { Request } from 'express';
+import { REQUEST_ID_HEADER } from '@common/middleware/request-id.middleware';
 import type { ApiResponse } from '@common/responses/api-response.interface';
 import { AuditRepository } from '../repositories/audit.repository';
 import { UrlFetcherService } from './url-fetcher.service';
 import { HtmlParserService } from './html-parser.service';
+import { AuditQueueService } from './audit-queue.service';
 import { CacheService } from '../../../shared/redis/cache.service';
 import { AppConfigService } from '@config/app-config.service';
 import { CreateAuditDto } from '../dto/create-audit.dto';
 import { AuditStatus } from '../constants/audit-status.enum';
 import { generateCacheKey } from '../utils/url-normalizer.util';
-import { REQUEST_ID_HEADER } from '@common/middleware/request-id.middleware';
 
 export interface AuditSuccessData {
   id: string;
@@ -76,23 +81,47 @@ export class AuditService {
     private readonly auditRepository: AuditRepository,
     private readonly urlFetcherService: UrlFetcherService,
     private readonly htmlParserService: HtmlParserService,
+    private readonly auditQueueService: AuditQueueService,
     private readonly cacheService: CacheService,
     private readonly configService: AppConfigService,
   ) {}
 
   private getRequestId(): string {
-    return (this.request?.headers?.[REQUEST_ID_HEADER] as string) || 'N/A';
+    return (
+      this.request?.requestId || (this.request?.headers?.[REQUEST_ID_HEADER] as string) || 'N/A'
+    );
+  }
+
+  private logEvent(
+    event: string,
+    requestId: string,
+    url: string,
+    startTime: number,
+    details: Record<string, unknown> = {},
+  ): void {
+    this.logger.log(
+      JSON.stringify({
+        event,
+        requestId,
+        url,
+        elapsedTime: `${Date.now() - startTime}ms`,
+        ...details,
+      }),
+    );
   }
 
   async createAudit(dto: CreateAuditDto): Promise<ApiResponse<AuditResponseData>> {
     const requestId = this.getRequestId();
     const cacheKey = generateCacheKey(dto.url);
+    const startTime = Date.now();
 
-    // 1. Check Redis Cache
+    this.logEvent('Audit Started', requestId, dto.url, startTime);
+
+    // ── 1. Check Redis Cache (BEFORE queue) ──
     const cachedResponse = await this.cacheService.get<ApiResponse<AuditSuccessData>>(cacheKey);
 
     if (cachedResponse) {
-      this.logger.log(`[${requestId}] Cache HIT for key: ${cacheKey}`);
+      this.logEvent('Cache HIT', requestId, dto.url, startTime, { cacheKey });
       return {
         ...cachedResponse,
         data: {
@@ -102,26 +131,40 @@ export class AuditService {
       };
     }
 
-    this.logger.log(`[${requestId}] Cache MISS for key: ${cacheKey}`);
+    this.logEvent('Cache MISS', requestId, dto.url, startTime, { cacheKey });
 
-    // 2. Log Audit Started
-    this.logger.log(`[${requestId}] Audit Started - URL: ${dto.url}`);
+    // ── 2. Enqueue audit execution ──
+    // Cache misses enter the concurrency queue.
+    // If queue is full, AuditQueueService throws HTTP 503.
+    // DB record creation is DEFERRED until a worker slot is acquired.
+    return this.auditQueueService.enqueue<ApiResponse<AuditResponseData>>(
+      () => this.executeAudit(dto, requestId, cacheKey, startTime),
+      { requestId, url: dto.url },
+    );
+  }
 
-    // 3. Create DB Record (PENDING)
+  /**
+   * Core audit execution logic.
+   * Runs INSIDE a concurrency slot after being dequeued.
+   */
+  private async executeAudit(
+    dto: CreateAuditDto,
+    requestId: string,
+    cacheKey: string,
+    startTime: number,
+  ): Promise<ApiResponse<AuditResponseData>> {
+    // ── 3a. Create DB Record (PENDING) — deferred until slot acquired ──
     const audit = await this.auditRepository.create(dto.url, AuditStatus.PENDING);
 
-    // 4. Log Request Sent
-    this.logger.log(`[${requestId}] Request Sent - URL: ${dto.url}`);
-
-    // 5. Execute HTTP Fetch
+    // ── 3b. Execute HTTP Fetch ──
     const fetchResult = await this.urlFetcherService.fetchUrl(dto.url);
     const elapsedTime = fetchResult.responseTime ?? 0;
 
-    // 6. Handle Timeout specifically -> HTTP 504 + DB persist
+    // ── 3c. Handle Timeout → HTTP 504 + DB persist ──
     if (!fetchResult.success && fetchResult.failureReason === 'TIMEOUT') {
-      this.logger.warn(
-        `[${requestId}] Request Timed Out - URL: ${dto.url} - Elapsed: ${elapsedTime}ms`,
-      );
+      this.logEvent('Timeout', requestId, dto.url, startTime, {
+        fetchElapsedTime: `${elapsedTime}ms`,
+      });
 
       await this.auditRepository.update(audit.id, {
         status: AuditStatus.FAILED,
@@ -131,9 +174,10 @@ export class AuditService {
         finalUrl: dto.url,
       });
 
-      this.logger.warn(
-        `[${requestId}] Audit Failed - URL: ${dto.url} - Status: FAILED - Reason: TIMEOUT`,
-      );
+      this.logEvent('Audit Failed', requestId, dto.url, startTime, {
+        status: AuditStatus.FAILED,
+        reason: 'TIMEOUT',
+      });
 
       throw new GatewayTimeoutException({
         success: false,
@@ -143,7 +187,7 @@ export class AuditService {
       });
     }
 
-    // 7. Handle Successful Fetch
+    // ── 3d. Handle Successful Fetch ──
     if (fetchResult.success && fetchResult.statusCode !== undefined) {
       const finalUrl = fetchResult.finalUrl ?? dto.url;
       const htmlContent = fetchResult.htmlContent ?? '';
@@ -164,9 +208,12 @@ export class AuditService {
 
       const finalRecord = updatedAudit ?? audit;
 
-      this.logger.log(
-        `[${requestId}] Request Completed - URL: ${dto.url} - Status: COMPLETED - Elapsed: ${elapsedTime}ms`,
-      );
+      this.logEvent('Audit Completed', requestId, dto.url, startTime, {
+        status: AuditStatus.COMPLETED,
+        fetchElapsedTime: `${elapsedTime}ms`,
+        queueLength: this.auditQueueService.size,
+        activeWorkers: this.auditQueueService.pending,
+      });
 
       const response: ApiResponse<AuditSuccessData> = {
         success: true,
@@ -194,7 +241,7 @@ export class AuditService {
       return response;
     }
 
-    // 8. Handle non-timeout network failures (DNS, SSL, Refused, Network Unreachable)
+    // ── 3e. Handle non-timeout network failures ──
     const errorMessage = fetchResult.errorMessage ?? 'Audit execution failed';
     const failureReason = fetchResult.failureReason ?? 'EXECUTION_FAILED';
 
@@ -206,9 +253,12 @@ export class AuditService {
       finalUrl: fetchResult.finalUrl ?? dto.url,
     });
 
-    this.logger.warn(
-      `[${requestId}] Audit Failed - URL: ${dto.url} - Status: FAILED - Reason: ${failureReason}`,
-    );
+    this.logEvent('Audit Failed', requestId, dto.url, startTime, {
+      status: AuditStatus.FAILED,
+      reason: failureReason,
+      queueLength: this.auditQueueService.size,
+      activeWorkers: this.auditQueueService.pending,
+    });
 
     return {
       success: false,
