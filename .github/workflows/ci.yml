@@ -1,0 +1,95 @@
+name: Continuous Integration
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test and build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: page_pulse_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d page_pulse_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_HOST: localhost
+      DATABASE_PORT: 5432
+      DATABASE_NAME: page_pulse_test
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: postgres
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      CACHE_TTL: 60
+      REQUEST_TIMEOUT: 5000
+      AUDIT_REQUEST_TIMEOUT: 10000
+      AUDIT_MAX_CONCURRENT: 5
+      AUDIT_MAX_QUEUE: 100
+      MAX_CONCURRENT_REQUESTS: 100
+      RATE_LIMIT_TTL: 60
+      RATE_LIMIT_LIMIT: 100
+      LOG_LEVEL: silent
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint:check
+
+      - name: Run unit tests
+        run: npm test -- --runInBand
+
+      - name: Run integration tests
+        run: npm run test:e2e -- --runInBand
+
+      - name: Generate coverage report
+        run: npm run test:cov -- --runInBand
+
+      - name: Upload coverage report
+        if: always() && hashFiles('coverage/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build project
+        run: npm run build
