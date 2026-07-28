@@ -381,4 +381,35 @@ describe('AuditService', () => {
       expect(mockAuditRepository.update).not.toHaveBeenCalled();
     });
   });
+
+  describe('createAudit - Additional Network Failures', () => {
+    const failures: Array<[string, string, string]> = [
+      ['HTTP error', 'HTTP_ERROR', 'Target returned HTTP 500'],
+      ['invalid SSL certificate', 'SSL_ERROR', 'Invalid SSL certificate'],
+    ];
+
+    it.each(failures)(
+      'persists %s failures without caching the audit result',
+      async (_scenario: string, reason: string, message: string) => {
+        mockCacheService.get.mockResolvedValue(null);
+        mockUrlFetcherService.fetchUrl.mockResolvedValue({
+          success: false,
+          responseTime: 20,
+          finalUrl: 'https://example.com',
+          errorMessage: message,
+          failureReason: reason,
+        });
+
+        const result = await service.createAudit({ url: 'https://example.com' });
+
+        expect(result.success).toBe(false);
+        expect(result.data).toEqual(expect.objectContaining({ error: message, cached: false }));
+        expect(mockAuditRepository.update).toHaveBeenCalledWith(
+          'test-audit-uuid-123',
+          expect.objectContaining({ failureReason: reason, errorMessage: message }),
+        );
+        expect(mockCacheService.set).not.toHaveBeenCalled();
+      },
+    );
+  });
 });
