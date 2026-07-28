@@ -7,6 +7,7 @@ export default registerAs('appConfig', (): AppConfiguration => ({
     nodeEnv: (process.env.NODE_ENV || 'development') as Environment,
   },
   database: {
+    url: process.env.DATABASE_URL,
     host: process.env.DATABASE_HOST!,
     port: parseInt(process.env.DATABASE_PORT || '5432', 10),
     name: process.env.DATABASE_NAME!,
@@ -14,6 +15,7 @@ export default registerAs('appConfig', (): AppConfiguration => ({
     password: process.env.DATABASE_PASSWORD!,
   },
   redis: {
+    url: process.env.REDIS_URL,
     host: process.env.REDIS_HOST!,
     port: parseInt(process.env.REDIS_PORT || '6379', 10),
   },

@@ -98,12 +98,14 @@ All runtime configuration is read through `ConfigService` and validated at start
 | --- | --- | --- |
 | `PORT` | `3000` | HTTP server port. |
 | `NODE_ENV` | `development` | One of `development`, `production`, `test`, or `staging`. |
-| `DATABASE_HOST` | `localhost` | PostgreSQL host. |
+| `DATABASE_URL` | — | Managed PostgreSQL connection URL. When set, it takes precedence over individual `DATABASE_*` values. |
+| `DATABASE_HOST` | `localhost` | PostgreSQL host when `DATABASE_URL` is not set. |
 | `DATABASE_PORT` | `5432` | PostgreSQL port. |
 | `DATABASE_NAME` | `page_pulse_db` | PostgreSQL database name. |
 | `DATABASE_USER` | `postgres` | PostgreSQL user. |
 | `DATABASE_PASSWORD` | `postgres` | PostgreSQL password. Use a secret in production. |
-| `REDIS_HOST` | `localhost` | Redis host. |
+| `REDIS_URL` | — | Managed Redis connection URL. When set, it takes precedence over `REDIS_HOST` and `REDIS_PORT`. |
+| `REDIS_HOST` | `localhost` | Redis host when `REDIS_URL` is not set. |
 | `REDIS_PORT` | `6379` | Redis port. |
 | `CACHE_TTL` | `60` | Successful audit cache lifetime in seconds. |
 | `REQUEST_TIMEOUT` | `5000` | Fallback outbound request timeout in milliseconds. |

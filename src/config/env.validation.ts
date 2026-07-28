@@ -1,5 +1,15 @@
-import { plainToInstance, Type } from 'class-transformer';
-import { IsEnum, IsNotEmpty, IsNumber, IsString, Max, Min, validateSync } from 'class-validator';
+import { plainToInstance, Transform, Type } from 'class-transformer';
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Max,
+  Min,
+  validateSync,
+} from 'class-validator';
 import type { Environment, LogLevel } from './app-config.interface';
 
 const ENVIRONMENTS: Environment[] = ['development', 'production', 'test', 'staging'];
@@ -16,6 +26,11 @@ export class EnvironmentVariables {
     message: `NODE_ENV must be one of: ${ENVIRONMENTS.join(', ')}`,
   })
   NODE_ENV: string = 'development';
+
+  @IsOptional()
+  @Transform(({ value }: { value: string | undefined }) => value || undefined)
+  @IsUrl({ protocols: ['postgres', 'postgresql'], require_protocol: true })
+  DATABASE_URL?: string;
 
   @IsString({ message: 'DATABASE_HOST must be a string' })
   @IsNotEmpty({ message: 'DATABASE_HOST is required' })
@@ -37,6 +52,11 @@ export class EnvironmentVariables {
 
   @IsString({ message: 'DATABASE_PASSWORD must be a string' })
   DATABASE_PASSWORD: string = 'postgres';
+
+  @IsOptional()
+  @Transform(({ value }: { value: string | undefined }) => value || undefined)
+  @IsUrl({ protocols: ['redis', 'rediss'], require_protocol: true })
+  REDIS_URL?: string;
 
   @IsString({ message: 'REDIS_HOST must be a string' })
   @IsNotEmpty({ message: 'REDIS_HOST is required' })

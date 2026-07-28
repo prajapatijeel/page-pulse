@@ -7,6 +7,7 @@ export interface AppConfig {
 }
 
 export interface DatabaseConfig {
+  url?: string;
   host: string;
   port: number;
   name: string;
@@ -15,6 +16,7 @@ export interface DatabaseConfig {
 }
 
 export interface RedisConfig {
+  url?: string;
   host: string;
   port: number;
 }

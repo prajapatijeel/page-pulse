@@ -33,9 +33,11 @@ export const redisProviders: Provider[] = [
     provide: REDIS_CLIENT,
     inject: [AppConfigService],
     useFactory: async (configService: AppConfigService): Promise<RedisClientType> => {
-      const { host, port } = configService.redis;
+      const { url, host, port } = configService.redis;
+      const redisUrl = url ?? `redis://${host}:${port}`;
+      const endpoint = new URL(redisUrl).host;
       const client = createClient({
-        url: `redis://${host}:${port}`,
+        url: redisUrl,
         RESP: 2 as const, // Use RESP2 protocol to ensure compatibility with Windows & Redis <6.0
         pingInterval: 10000,
         socket: {
@@ -67,7 +69,7 @@ export const redisProviders: Provider[] = [
       });
 
       client.on('reconnecting', () => {
-        logger.warn(`Redis reconnecting to ${host}:${port}...`);
+        logger.warn(`Redis reconnecting to ${endpoint}...`);
       });
 
       try {
@@ -75,7 +77,7 @@ export const redisProviders: Provider[] = [
       } catch (err: unknown) {
         const error = err as Error;
         logger.warn(
-          `Unable to connect to Redis at ${host}:${port}: ${error.message}. ` +
+          `Unable to connect to Redis at ${endpoint}: ${error.message}. ` +
             `Application starting with cache-bypass fallback.`,
         );
       }
