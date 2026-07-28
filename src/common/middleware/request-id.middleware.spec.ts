@@ -21,9 +21,10 @@ describe('RequestIdMiddleware', () => {
   it('should generate a new UUID if x-request-id header is missing', () => {
     middleware.use(mockRequest as Request, mockResponse as Response, nextFunction);
 
-    const generatedId = mockRequest.headers?.[REQUEST_ID_HEADER];
+    const generatedId = mockRequest.requestId;
     expect(generatedId).toBeDefined();
     expect(typeof generatedId).toBe('string');
+    expect(mockRequest.requestId).toBe(generatedId);
     expect(mockResponse.setHeader).toHaveBeenCalledWith(REQUEST_ID_HEADER, generatedId);
     expect(nextFunction).toHaveBeenCalled();
   });
@@ -36,7 +37,7 @@ describe('RequestIdMiddleware', () => {
 
     middleware.use(mockRequest as Request, mockResponse as Response, nextFunction);
 
-    expect(mockRequest.headers[REQUEST_ID_HEADER]).toBe(customId);
+    expect(mockRequest.requestId).toBe(customId);
     expect(mockResponse.setHeader).toHaveBeenCalledWith(REQUEST_ID_HEADER, customId);
     expect(nextFunction).toHaveBeenCalled();
   });

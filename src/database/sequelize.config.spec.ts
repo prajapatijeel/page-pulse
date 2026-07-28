@@ -48,4 +48,21 @@ describe('createSequelizeOptions', () => {
     const options = createSequelizeOptions(mockConfigService);
     expect(options.logging).toBe(console.log);
   });
+
+  it('should use credentials embedded in DATABASE_URL', () => {
+    const mockConfigService = {
+      database: {
+        url: 'postgresql://url_user:url_password@db.example.com:5433/page_pulse',
+      },
+      isDevelopment: false,
+    } as unknown as AppConfigService;
+
+    const options = createSequelizeOptions(mockConfigService);
+
+    expect(options.host).toBe('db.example.com');
+    expect(options.port).toBe(5433);
+    expect(options.username).toBe('url_user');
+    expect(options.password).toBe('url_password');
+    expect(options.database).toBe('page_pulse');
+  });
 });

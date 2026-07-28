@@ -1,4 +1,12 @@
-import { ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  ArgumentsHost,
+  BadRequestException,
+  GatewayTimeoutException,
+  InternalServerErrorException,
+  NotFoundException,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { Request, Response } from 'express';
 import { GlobalExceptionFilter } from './global-exception.filter';
 
@@ -27,23 +35,107 @@ describe('GlobalExceptionFilter', () => {
     };
   });
 
-  it('should format HttpException correctly', () => {
-    const exception = new HttpException('Bad Request', HttpStatus.BAD_REQUEST);
+  it('returns structured field errors for validation failures', () => {
+    const exception = new BadRequestException({
+      message: 'Validation failed.',
+      errorCode: 'VALIDATION_ERROR',
+      fieldErrors: [{ field: 'url', messages: ['url must be a URL address'] }],
+    });
 
     filter.catch(exception, mockArgumentsHost as ArgumentsHost);
 
     expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
     expect(mockResponse.json).toHaveBeenCalledWith(
       expect.objectContaining({
+        success: false,
         statusCode: 400,
-        message: 'Bad Request',
+        errorCode: 'VALIDATION_ERROR',
+        message: 'Validation failed.',
+        fieldErrors: [{ field: 'url', messages: ['url must be a URL address'] }],
         requestId: 'filter-test-id',
         path: '/api/v1/test',
       }),
     );
   });
 
-  it('should handle unhandled 500 exceptions', () => {
+  it('maps resource-not-found errors to a consistent response', () => {
+    filter.catch(new NotFoundException('Audit not found.'), mockArgumentsHost as ArgumentsHost);
+
+    expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.NOT_FOUND);
+    expect(mockResponse.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        statusCode: 404,
+        errorCode: 'RESOURCE_NOT_FOUND',
+        message: 'Audit not found.',
+      }),
+    );
+  });
+
+  it('does not expose internal-server-error details', () => {
+    filter.catch(
+      new InternalServerErrorException('Database connection failed'),
+      mockArgumentsHost as ArgumentsHost,
+    );
+
+    expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
+    expect(mockResponse.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        statusCode: 500,
+        errorCode: 'INTERNAL_SERVER_ERROR',
+        message: 'Internal server error.',
+      }),
+    );
+    expect(mockResponse.json).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Database connection failed' }),
+    );
+  });
+
+  it('formats timeout exceptions without exposing upstream details', () => {
+    filter.catch(
+      new GatewayTimeoutException({
+        message: 'AxiosError: connect ETIMEDOUT',
+        errorCode: 'AUDIT_TIMEOUT',
+      }),
+      mockArgumentsHost as ArgumentsHost,
+    );
+
+    expect(mockResponse.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        statusCode: 504,
+        errorCode: 'AUDIT_TIMEOUT',
+        message: 'The upstream service did not respond in time.',
+      }),
+    );
+  });
+
+  it('formats rate-limit exceptions using the global error contract', () => {
+    filter.catch(
+      new HttpException(
+        {
+          errorCode: 'RATE_LIMIT_EXCEEDED',
+          message: 'Too many requests. Please try again later.',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      ),
+      mockArgumentsHost as ArgumentsHost,
+    );
+
+    expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.TOO_MANY_REQUESTS);
+    expect(mockResponse.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        statusCode: 429,
+        errorCode: 'RATE_LIMIT_EXCEEDED',
+        message: 'Too many requests. Please try again later.',
+        requestId: 'filter-test-id',
+      }),
+    );
+  });
+
+  it('handles unexpected exceptions without exposing the original error', () => {
     const exception = new Error('Database connection failed');
 
     filter.catch(exception, mockArgumentsHost as ArgumentsHost);
@@ -51,7 +143,10 @@ describe('GlobalExceptionFilter', () => {
     expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
     expect(mockResponse.json).toHaveBeenCalledWith(
       expect.objectContaining({
+        success: false,
         statusCode: 500,
+        errorCode: 'INTERNAL_SERVER_ERROR',
+        message: 'Internal server error.',
         requestId: 'filter-test-id',
       }),
     );

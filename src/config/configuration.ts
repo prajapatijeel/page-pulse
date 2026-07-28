@@ -7,6 +7,7 @@ export default registerAs('appConfig', (): AppConfiguration => ({
     nodeEnv: (process.env.NODE_ENV || 'development') as Environment,
   },
   database: {
+    url: process.env.DATABASE_URL,
     host: process.env.DATABASE_HOST!,
     port: parseInt(process.env.DATABASE_PORT || '5432', 10),
     name: process.env.DATABASE_NAME!,
@@ -14,6 +15,7 @@ export default registerAs('appConfig', (): AppConfiguration => ({
     password: process.env.DATABASE_PASSWORD!,
   },
   redis: {
+    url: process.env.REDIS_URL,
     host: process.env.REDIS_HOST!,
     port: parseInt(process.env.REDIS_PORT || '6379', 10),
   },
@@ -21,8 +23,15 @@ export default registerAs('appConfig', (): AppConfiguration => ({
     ttl: parseInt(process.env.CACHE_TTL || '60', 10),
   },
   http: {
-    timeout: parseInt(process.env.REQUEST_TIMEOUT || '5000', 10),
+    timeout: parseInt(
+      process.env.AUDIT_REQUEST_TIMEOUT || process.env.REQUEST_TIMEOUT || '10000',
+      10,
+    ),
     maxConcurrentRequests: parseInt(process.env.MAX_CONCURRENT_REQUESTS || '100', 10),
+  },
+  auditQueue: {
+    maxConcurrent: parseInt(process.env.AUDIT_MAX_CONCURRENT || '5', 10),
+    maxQueue: parseInt(process.env.AUDIT_MAX_QUEUE || '100', 10),
   },
   rateLimit: {
     limit: parseInt(process.env.RATE_LIMIT_LIMIT || '100', 10),

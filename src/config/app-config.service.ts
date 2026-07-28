@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  AuditQueueConfig,
   CacheConfig,
   DatabaseConfig,
   Environment,
@@ -52,6 +53,10 @@ export class AppConfigService {
 
   get http(): HttpConfig {
     return this.configService.getOrThrow<HttpConfig>('appConfig.http');
+  }
+
+  get auditQueue(): AuditQueueConfig {
+    return this.configService.getOrThrow<AuditQueueConfig>('appConfig.auditQueue');
   }
 
   get rateLimit(): RateLimitConfig {

@@ -56,4 +56,14 @@ describe('Environment Validation', () => {
 
     expect(() => validate(invalidEnv)).toThrow(/NODE_ENV must be one of/);
   });
+
+  it('should accept managed PostgreSQL and Redis connection URLs', () => {
+    const result = validate({
+      DATABASE_URL: 'postgresql://user:password@db.example.com:5432/page_pulse',
+      REDIS_URL: 'redis://default:password@redis.example.com:6379',
+    });
+
+    expect(result.DATABASE_URL).toContain('db.example.com');
+    expect(result.REDIS_URL).toContain('redis.example.com');
+  });
 });

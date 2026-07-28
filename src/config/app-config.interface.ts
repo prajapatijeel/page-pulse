@@ -7,6 +7,7 @@ export interface AppConfig {
 }
 
 export interface DatabaseConfig {
+  url?: string;
   host: string;
   port: number;
   name: string;
@@ -15,6 +16,7 @@ export interface DatabaseConfig {
 }
 
 export interface RedisConfig {
+  url?: string;
   host: string;
   port: number;
 }
@@ -26,6 +28,11 @@ export interface CacheConfig {
 export interface HttpConfig {
   timeout: number;
   maxConcurrentRequests: number;
+}
+
+export interface AuditQueueConfig {
+  maxConcurrent: number;
+  maxQueue: number;
 }
 
 export interface RateLimitConfig {
@@ -43,6 +50,7 @@ export interface AppConfiguration {
   redis: RedisConfig;
   cache: CacheConfig;
   http: HttpConfig;
+  auditQueue: AuditQueueConfig;
   rateLimit: RateLimitConfig;
   log: LogConfig;
 }

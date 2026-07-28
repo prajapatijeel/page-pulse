@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { REDIS_CLIENT } from '@app/shared/redis/redis.constants';
+import { AuditQueueService } from '@modules/audit/services/audit-queue.service';
 import { AppModule } from './../src/app.module';
 
 describe('Health Module (e2e)', () => {
@@ -17,6 +18,12 @@ describe('Health Module (e2e)', () => {
         isOpen: true,
         quit: jest.fn().mockResolvedValue(undefined),
       })
+      .overrideProvider(AuditQueueService)
+      .useValue({
+        enqueue: jest.fn((task: () => Promise<unknown>) => task()),
+        size: 0,
+        pending: 0,
+      })
       .compile();
 
     app = moduleFixture.createNestApplication();
@@ -29,10 +36,21 @@ describe('Health Module (e2e)', () => {
       .get('/api/v1/health')
       .expect(200)
       .expect((res) => {
+        expect(res.headers['x-request-id']).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        );
         expect(res.body).toHaveProperty('status', 'ok');
         expect(res.body).toHaveProperty('service', 'Page Pulse API');
         expect(res.body).toHaveProperty('timestamp');
       });
+  });
+
+  it('preserves a client supplied X-Request-ID', () => {
+    return request(app.getHttpServer())
+      .get('/api/v1/health')
+      .set('X-Request-ID', 'client-trace-123')
+      .expect(200)
+      .expect('X-Request-ID', 'client-trace-123');
   });
 
   afterEach(async () => {
