@@ -4,6 +4,7 @@ import {
   GatewayTimeoutException,
   InternalServerErrorException,
   NotFoundException,
+  HttpException,
   HttpStatus,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
@@ -106,6 +107,30 @@ describe('GlobalExceptionFilter', () => {
         statusCode: 504,
         errorCode: 'AUDIT_TIMEOUT',
         message: 'The upstream service did not respond in time.',
+      }),
+    );
+  });
+
+  it('formats rate-limit exceptions using the global error contract', () => {
+    filter.catch(
+      new HttpException(
+        {
+          errorCode: 'RATE_LIMIT_EXCEEDED',
+          message: 'Too many requests. Please try again later.',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      ),
+      mockArgumentsHost as ArgumentsHost,
+    );
+
+    expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.TOO_MANY_REQUESTS);
+    expect(mockResponse.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        statusCode: 429,
+        errorCode: 'RATE_LIMIT_EXCEEDED',
+        message: 'Too many requests. Please try again later.',
+        requestId: 'filter-test-id',
       }),
     );
   });

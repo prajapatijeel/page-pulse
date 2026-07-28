@@ -29,6 +29,7 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/sequelize": "^11.0.1",
     "@nestjs/swagger": "^11.4.6",
+    "@nestjs/throttler": "^6.5.0",
     "axios": "^1.18.1",
     "cache-manager": "^7.2.9",
     "cache-manager-redis-yet": "^5.1.5",
@@ -96,12 +97,27 @@
       "^@config/(.*)$": "<rootDir>/config/$1",
       "^@modules/(.*)$": "<rootDir>/modules/$1",
       "^@common/(.*)$": "<rootDir>/common/$1",
-      "^@database/(.*)$": "<rootDir>/database/$1"
+      "^@database/(.*)$": "<rootDir>/database/$1",
+      "^(\\.{1,2}/.*)\\.js$": "$1"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.(t|j)s",
+      "!main.ts",
+      "!**/*.module.ts",
+      "!database/**",
+      "!**/*.interface.ts",
+      "!**/*.d.ts",
+      "!**/*.model.ts",
+      "!**/*.constants.ts",
+      "!**/*.enum.ts",
+      "!**/dto/**"
     ],
     "coverageDirectory": "../coverage",
+    "coverageThreshold": {
+      "global": {
+        "statements": 80
+      }
+    },
     "testEnvironment": "node"
   }
 }
