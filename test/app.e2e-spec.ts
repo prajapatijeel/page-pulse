@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { REDIS_CLIENT } from '@app/shared/redis/redis.constants';
+import { AuditQueueService } from '@modules/audit/services/audit-queue.service';
 import { AppModule } from './../src/app.module';
 
 describe('Health Module (e2e)', () => {
@@ -16,6 +17,12 @@ describe('Health Module (e2e)', () => {
       .useValue({
         isOpen: true,
         quit: jest.fn().mockResolvedValue(undefined),
+      })
+      .overrideProvider(AuditQueueService)
+      .useValue({
+        enqueue: jest.fn((task: () => Promise<unknown>) => task()),
+        size: 0,
+        pending: 0,
       })
       .compile();
 
