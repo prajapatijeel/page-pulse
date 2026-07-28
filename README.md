@@ -1,403 +1,282 @@
-# Page Pulse — Production Backend API
+# Page Pulse
 
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
-[![NestJS](https://img.shields.io/badge/NestJS-11.0-red.svg)](https://nestjs.com/)
-[![Sequelize](https://img.shields.io/badge/Sequelize-6.37-blueviolet.svg)](https://sequelize.org/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16.0-blue.svg)](https://www.postgresql.org/)
-[![Redis](https://img.shields.io/badge/Redis-7.0-red.svg)](https://redis.io/)
-[![License](https://img.shields.io/badge/License-UNLICENSED-lightgrey.svg)](<>)
+Page Pulse is a production-oriented URL audit API. It fetches a public web page, measures the request, extracts useful HTML metadata, persists the audit result, and caches successful results for fast repeat lookups. The project demonstrates a NestJS backend built with clean boundaries, resilient request handling, observability, and automated quality checks.
 
-Page Pulse is a enterprise-grade, modular Node.js backend engine built with NestJS, TypeScript, Sequelize ORM, PostgreSQL, and Redis. It is architected around **Feature-Based Clean Architecture (Vertical Slices)** to ensure high cohesion, low coupling, fail-fast environment validation, and production resiliency.
+## Features
 
----
+- URL audit endpoint with DTO validation and URL normalization
+- HTTP fetching with redirects, configurable timeouts, and categorized failures
+- Metadata extraction: title, description, content length, final URL, HTTPS status, and response details
+- PostgreSQL persistence through Sequelize
+- Redis-backed cache with configurable TTL
+- Concurrency-limited audit queue with queue-overflow protection
+- Per-client-IP global rate limiting; health and Swagger endpoints are excluded
+- Request IDs, including preservation of a caller-provided `X-Request-ID`
+- Structured request and application-event logging
+- Global exception filter with safe, consistent error responses
+- Swagger/OpenAPI documentation
+- Jest unit tests and Supertest/Nest integration tests
+- GitHub Actions CI for linting, tests, coverage, and builds
 
-## 📍 Table of Contents
+## Architecture
 
-- [Project Overview](#-project-overview)
-- [Architecture](#-architecture)
-- [Technology Stack](#-technology-stack)
-- [Folder Structure](#-folder-structure)
-- [Environment Variables](#-environment-variables)
-- [Installation](#-installation)
-- [Docker](#-docker)
-- [Running Locally](#-running-locally)
-- [Development Workflow](#-development-workflow)
-- [Testing](#-testing)
-- [Deployment](#-deployment)
-- [Future Phases](#-future-phases)
+The application uses a practical Clean Architecture style: HTTP concerns are kept at the edge, application services coordinate use cases, and infrastructure integrations are encapsulated behind focused services and repositories.
 
----
+| Location | Responsibility |
+| --- | --- |
+| `src/modules/audit` | Audit feature slice: controller, DTO, service, queue, fetcher, parser, repository, and Sequelize model. |
+| `src/modules/health` | Lightweight health endpoint. |
+| `src/common` | Cross-cutting middleware, interceptor, guards, exception filter, response contracts, and validation helpers. |
+| `src/shared/redis` | Redis client provider and cache abstraction. |
+| `src/config` | Typed, validated environment configuration. |
+| `src/database` | Sequelize and PostgreSQL setup. |
+| `test` | End-to-end/integration test configuration and tests. |
+| `.github/workflows` | Continuous-integration workflow. |
 
-## 🚀 Project Overview
+Controllers remain thin: they accept validated input and delegate to services. `AuditService` coordinates cache lookup, queued execution, persistence, fetching, parsing, and response composition. External dependencies are isolated so tests can mock them without contacting real websites, Redis, or PostgreSQL.
 
-Page Pulse is designed to serve as a reliable, scalable foundation for web application monitoring, audit trail tracking, and page analytics services. Key operational characteristics include:
+## Technology Stack
 
-- **Enterprise Modular Blueprint:** Strict separation between framework primitives (`common`), application configuration (`config`), database ORM (`database`), shared infrastructure (`shared`), and domain feature modules (`modules`).
-- **Fail-Fast Startup Validation:** Environment schema validation executed via `class-validator` before port binding or database connection initialization.
-- **Fail-Safe HTTP Pipeline:** Uniform JSON error responses via a global exception filter, request timing via RxJS interceptors, and correlation tracing via `x-request-id` UUID middleware.
-- **Production Containerization:** Multi-stage Docker build producing isolated lightweight Linux Alpine runtime containers operating under a non-root `node` user.
+- [NestJS](https://nestjs.com/) and TypeScript
+- Sequelize with PostgreSQL
+- Redis and `cache-manager`
+- Axios for outbound HTTP requests
+- Cheerio for HTML metadata parsing
+- `p-queue` for audit concurrency control
+- `@nestjs/throttler` for rate limiting
+- Swagger/OpenAPI via `@nestjs/swagger`
+- Jest and Supertest
+- GitHub Actions
 
----
+## Prerequisites
 
-## 🏛️ Architecture
+- Node.js 20 or later
+- npm
+- PostgreSQL 16+ (or a compatible local version)
+- Redis 7+ (or a compatible local version)
 
-Page Pulse follows **Feature-Based Clean Architecture (Vertical Slices)**:
-
-```
-Incoming Request
-  │
-  ├── RequestIdMiddleware ───────────────> Assigns/preserves x-request-id UUID header
-  ├── LoggingInterceptor ────────────────> Starts execution timer
-  ├── Global ValidationPipe ─────────────> Validates DTO payload & strips unknown properties
-  ├── Controller Layer ──────────────────> HTTP Route Handler (GET /api/v1/health)
-  ├── Service Layer ─────────────────────> Pure Business Domain Logic
-  ├── Repository / Data Access Layer ───> Sequelize ORM Abstraction (PostgreSQL)
-  ├── LoggingInterceptor ────────────────> Logs status code and execution duration (ms)
-  └── GlobalExceptionFilter ─────────────> Intercepts uncaught errors -> Returns standard JSON error payload
-```
-
-### Core Architecture Principles
-
-1. **Vertical Feature Slicing (`src/modules/`):** Features like `health` and `audit` contain their own controllers, services, repositories, DTOs, models, and interfaces in a self-contained folder.
-2. **Explicit Data Access Layer:** Database queries are encapsulated inside Repositories, isolating domain business logic from ORM framework specifics.
-3. **Fail-Fast Configuration:** Configuration values are validated on application boot. If any required environment variable is missing or malformed, the process exits immediately with actionable log output.
-4. **No Direct ORM Auto-Sync in Production (`synchronize: false`):** Schema migrations must be version-controlled to protect production database integrity.
-
----
-
-## 🛠️ Technology Stack
-
-| Layer / Component        | Technology                              | Version     | Purpose                                             |
-| ------------------------ | --------------------------------------- | ----------- | --------------------------------------------------- |
-| **Core Framework**       | NestJS                                  | `^11.0.1`   | Modular Node.js framework with DI container         |
-| **Language**             | TypeScript                              | `^5.7.3`    | Strongly-typed JavaScript with strict mode enabled  |
-| **ORM**                  | Sequelize ORM                           | `^6.37.8`   | Database ORM with `sequelize-typescript` decorators |
-| **Database**             | PostgreSQL                              | `16-alpine` | Relational database storage                         |
-| **In-Memory Store**      | Redis                                   | `7-alpine`  | High-performance key-value cache & state store      |
-| **HTTP Outbound Client** | Axios / `@nestjs/axios`                 | `^1.18.1`   | Asynchronous HTTP request client                    |
-| **Validation**           | `class-validator` & `class-transformer` | `^0.15.1`   | Decorator-driven DTO & environment validation       |
-| **Logging**              | `nestjs-pino` / `pino-http`             | `^4.6.1`    | Low-overhead structured JSON logging                |
-| **Unit & E2E Testing**   | Jest & Supertest                        | `^30.0.0`   | Test runner and HTTP assertion engine               |
-| **Code Quality**         | ESLint & Prettier                       | `^9.18.0`   | Flat ESLint rules & automated code formatter        |
-| **Git Automation**       | Husky & lint-staged                     | `^9.1.7`    | Pre-commit hook runner targeting staged files       |
-
----
-
-## 📁 Folder Structure
-
-```
-page-pulse/
-├── .editorconfig            # Cross-IDE indentation and character set definitions
-├── .env.example             # Documented environment variable template
-├── .gitignore               # Excludes secrets, node_modules, and build outputs
-├── .dockerignore            # Excludes local artifacts from Docker build context
-├── Dockerfile               # Multi-stage container build (development, builder, production)
-├── docker-compose.yml       # Container orchestration (app, postgres, redis)
-├── eslint.config.mjs        # NestJS v11 flat ESLint configuration
-├── nest-cli.json            # NestJS CLI build options
-├── package.json             # Scripts, dependencies, lint-staged, and Jest config
-├── tsconfig.json            # TypeScript compiler configuration & path aliases
-├── tsconfig.build.json      # Production build compilation settings
-├── src/
-│   ├── main.ts              # Bootstrap entrypoint (Global prefix /api/v1, ValidationPipe, Filters)
-│   ├── app.module.ts        # Root application module registering middleware & global modules
-│   ├── app.controller.ts    # Default application controller
-│   ├── app.service.ts       # Default application service
-│   ├── config/              # Global Configuration Layer
-│   │   ├── app-config.interface.ts  # TypeScript contracts for configuration objects
-│   │   ├── app-config.module.ts     # Global NestJS module providing AppConfigService
-│   │   ├── app-config.service.ts    # Strongly-typed ConfigService wrapper with getters
-│   │   ├── configuration.ts         # Nested configuration factory mapping process.env
-│   │   └── env.validation.ts        # Class-validator environment schema validation DTO
-│   ├── database/            # Database Layer
-│   │   ├── database.module.ts       # Global Database module registering SequelizeModule.forRootAsync
-│   │   ├── sequelize.config.ts      # Sequelize options factory (pooling, retries, dialect)
-│   │   └── sequelize.providers.ts   # Database provider tokens
-│   ├── shared/              # Shared Application Infrastructure
-│   │   └── redis/           # Global Redis Connection Module
-│   │       ├── redis.constants.ts   # REDIS_CLIENT injection token
-│   │       ├── redis.module.ts      # Shared Redis module with OnModuleDestroy hook
-│   │       └── redis.providers.ts   # Async Redis client factory provider
-│   ├── common/              # Framework Primitives & Utilities
-│   │   ├── constants/       # Global constant tokens
-│   │   ├── decorators/      # Custom NestJS parameter/method decorators
-│   │   ├── dto/             # Shared reusable DTOs (e.g. PaginationQueryDto)
-│   │   ├── enums/           # Universal domain enums
-│   │   ├── exceptions/      # Custom domain HTTP exceptions
-│   │   ├── filters/         # GlobalExceptionFilter formatting JSON error contracts
-│   │   ├── guards/          # Security & RBAC authorization guards
-│   │   ├── interceptors/    # LoggingInterceptor measuring execution latency
-│   │   ├── interfaces/      # System generic contracts
-│   │   ├── logger/          # Pino logger formatters
-│   │   ├── middleware/      # RequestIdMiddleware injecting x-request-id UUID
-│   │   ├── pipes/           # Custom validation & transformation pipes
-│   │   ├── responses/       # API response wrapper utilities
-│   │   ├── types/           # TypeScript utility types
-│   │   └── utils/           # Pure side-effect-free helper functions
-│   └── modules/             # Feature Modules (Vertical Slices)
-│       ├── health/          # Operational Health Check Feature
-│       │   ├── dto/health-response.dto.ts
-│       │   ├── health.controller.ts
-│       │   ├── health.module.ts
-│       │   └── health.service.ts
-│       └── audit/           # Audit Feature Module (Scaffolded)
-│           ├── audit.module.ts
-│           ├── constants/
-│           ├── controllers/
-│           ├── dto/
-│           ├── interfaces/
-│           ├── models/
-│           ├── repositories/
-│           ├── services/
-│           └── validators/
-└── test/                    # End-to-End Test Suite
-    ├── app.e2e-spec.ts      # E2E integration test hitting GET /api/v1/health
-    └── jest-e2e.json        # E2E Jest configuration with path alias mappings
-```
-
----
-
-## 🔐 Environment Variables
-
-Environment variables are defined in `.env` (derived from `.env.example`). Every variable is validated on application boot:
-
-| Variable                  | Type   | Default Value   | Validation Constraints                                       | Purpose & Description                            |
-| ------------------------- | ------ | --------------- | ------------------------------------------------------------ | ------------------------------------------------ |
-| `PORT`                    | Number | `3000`          | Min: 1, Max: 65535                                           | HTTP server binding port                         |
-| `NODE_ENV`                | Enum   | `development`   | `development`, `production`, `test`, `staging`               | Application execution environment mode           |
-| `DATABASE_HOST`           | String | `localhost`     | Required, non-empty                                          | PostgreSQL hostname or container network alias   |
-| `DATABASE_PORT`           | Number | `5432`          | Min: 1, Max: 65535                                           | PostgreSQL database TCP port                     |
-| `DATABASE_NAME`           | String | `page_pulse_db` | Required, non-empty                                          | PostgreSQL target database name                  |
-| `DATABASE_USER`           | String | `postgres`      | Required, non-empty                                          | PostgreSQL database user account                 |
-| `DATABASE_PASSWORD`       | String | `postgres`      | String                                                       | PostgreSQL authentication password               |
-| `REDIS_HOST`              | String | `localhost`     | Required, non-empty                                          | Redis server hostname or container network alias |
-| `REDIS_PORT`              | Number | `6379`          | Min: 1, Max: 65535                                           | Redis server TCP port                            |
-| `CACHE_TTL`               | Number | `60`            | Min: 0                                                       | Default cache time-to-live (seconds)             |
-| `REQUEST_TIMEOUT`         | Number | `5000`          | Min: 0                                                       | Axios HTTP outbound client request timeout (ms)  |
-| `MAX_CONCURRENT_REQUESTS` | Number | `100`           | Min: 1                                                       | Max concurrent HTTP outbound requests allowed    |
-| `RATE_LIMIT_LIMIT`        | Number | `100`           | Min: 1                                                       | Max HTTP requests allowed per client window      |
-| `RATE_LIMIT_TTL`          | Number | `60`            | Min: 1                                                       | Rate limiter sliding window duration (seconds)   |
-| `LOG_LEVEL`               | Enum   | `info`          | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` | Pino logger verbosity filter level               |
-
----
-
-## 📦 Installation
-
-### Prerequisites
-
-- **Node.js:** `v20.15.1` or higher
-- **npm:** `v10.7.0` or higher
-- **PostgreSQL:** `v16` (or Docker)
-- **Redis:** `v7` (or Docker)
-
-### Setup Steps
-
-1. **Clone the Repository:**
-
-   ```bash
-   git clone https://github.com/prajapatijeel/page-pulse.git
-   cd page-pulse
-   ```
-
-2. **Install Dependencies:**
-
-   ```bash
-   npm install
-   ```
-
-3. **Configure Environment File:**
-   Copy `.env.example` to `.env` and adjust database credentials to match your local setup:
-   ```bash
-   cp .env.example .env
-   ```
-
----
-
-## 🐳 Docker
-
-The application is containerized using Docker and orchestrated via Docker Compose.
-
-### Docker Services Overview
-
-- **`app`:** NestJS container running Node.js 20 Alpine.
-- **`postgres`:** PostgreSQL 16 Alpine container with health check (`pg_isready`) and named volume storage (`postgres_data`).
-- **`redis`:** Redis 7 Alpine container with health check (`redis-cli ping`) and named volume storage (`redis_data`).
-- **`page_pulse_network`:** Dedicated bridge network allowing container-to-container communication.
-
-### Docker Commands
-
-**Start Stack in Detached Mode:**
+## Installation
 
 ```bash
-docker compose up -d --build
+git clone <your-repository-url>
+cd page-pulse
+npm ci
 ```
 
-**Check Container Status & Health:**
+Create your local environment file from the template:
 
 ```bash
-docker compose ps
+cp .env.example .env
 ```
 
-**View Live Application Logs:**
+On PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Create a PostgreSQL database matching `DATABASE_NAME` (the default is `page_pulse_db`) and ensure Redis is running on the configured host and port. For example, with Docker:
 
 ```bash
-docker compose logs -f app
+docker run --name page-pulse-postgres -e POSTGRES_DB=page_pulse_db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres:16-alpine
+docker run --name page-pulse-redis -p 6379:6379 -d redis:7-alpine
 ```
 
-**Stop Container Stack:**
-
-```bash
-docker compose down
-```
-
-**Stop Stack and Remove Data Volumes:**
-
-```bash
-docker compose down -v
-```
-
----
-
-## 💻 Running Locally
-
-### Development Mode (with Hot Reloading)
+Start the development server:
 
 ```bash
 npm run start:dev
 ```
 
-### Debug Mode
+The API is available at `http://localhost:3000/api/v1`.
 
-```bash
-npm run start:debug
+## Environment Variables
+
+All runtime configuration is read through `ConfigService` and validated at startup. Do not commit `.env` files containing real credentials.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PORT` | `3000` | HTTP server port. |
+| `NODE_ENV` | `development` | One of `development`, `production`, `test`, or `staging`. |
+| `DATABASE_HOST` | `localhost` | PostgreSQL host. |
+| `DATABASE_PORT` | `5432` | PostgreSQL port. |
+| `DATABASE_NAME` | `page_pulse_db` | PostgreSQL database name. |
+| `DATABASE_USER` | `postgres` | PostgreSQL user. |
+| `DATABASE_PASSWORD` | `postgres` | PostgreSQL password. Use a secret in production. |
+| `REDIS_HOST` | `localhost` | Redis host. |
+| `REDIS_PORT` | `6379` | Redis port. |
+| `CACHE_TTL` | `60` | Successful audit cache lifetime in seconds. |
+| `REQUEST_TIMEOUT` | `5000` | Fallback outbound request timeout in milliseconds. |
+| `AUDIT_REQUEST_TIMEOUT` | `10000` | Audit-specific outbound timeout in milliseconds; takes precedence over `REQUEST_TIMEOUT`. |
+| `MAX_CONCURRENT_REQUESTS` | `100` | Configured maximum concurrent HTTP requests. |
+| `AUDIT_MAX_CONCURRENT` | `5` | Maximum audits executing concurrently. |
+| `AUDIT_MAX_QUEUE` | `100` | Maximum audits waiting in the queue before the API returns `503`. |
+| `RATE_LIMIT_LIMIT` | `100` | Requests allowed from one client IP in each rate-limit window. |
+| `RATE_LIMIT_TTL` | `60` | Rate-limit window in seconds. |
+| `LOG_LEVEL` | `info` | Application log level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`, or `silent`. |
+
+## API Documentation
+
+With the server running, open Swagger UI at:
+
+`http://localhost:3000/api/docs`
+
+Swagger documents the audit request contract and lets you execute requests in the browser. Swagger itself is excluded from rate limiting.
+
+## API Endpoints
+
+All application routes use the `/api/v1` prefix.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/` | Basic application greeting. |
+| `GET` | `/health` | Health status. Excluded from rate limiting. |
+| `POST` | `/audit` | Audits a public URL. |
+
+### Audit a URL
+
+```http
+POST /api/v1/audit
+Content-Type: application/json
+X-Request-ID: assessment-demo-001
+
+{
+  "url": "https://example.com"
+}
 ```
 
-### Production Mode (Local Build Test)
+Example successful response:
 
-```bash
-npm run build
-npm run start:prod
+```json
+{
+  "success": true,
+  "message": "Audit completed successfully",
+  "data": {
+    "id": "7d1bf7cf-7e94-4246-99c4-8e1ab6e3ad4f",
+    "url": "https://example.com",
+    "finalUrl": "https://example.com/",
+    "status": "COMPLETED",
+    "statusCode": 200,
+    "statusText": "OK",
+    "responseTime": 142,
+    "title": "Example Domain",
+    "description": null,
+    "contentLength": 1256,
+    "https": true,
+    "cached": false
+  }
+}
 ```
 
-### Health Check Endpoint Verification
+The response includes `X-Request-ID`. If the caller sends that header, its value is reused; otherwise the API generates a UUID.
 
-```bash
-curl http://localhost:3000/api/v1/health
+### Health Check
+
+```http
+GET /api/v1/health
 ```
-
-**Expected Response (HTTP 200 OK):**
 
 ```json
 {
   "status": "ok",
   "service": "Page Pulse API",
-  "timestamp": "2026-07-25T15:00:00.000Z"
+  "timestamp": "2026-07-28T10:00:00.000Z"
 }
 ```
 
----
+### Error Format
 
-## 🔄 Development Workflow
+All handled and unexpected failures use the same safe response structure. Internal stack traces, database errors, and raw Axios errors are logged internally but never sent to the caller.
 
-### Code Quality Enforcement
-
-- **Linting & Auto-Fix:**
-  ```bash
-  npm run lint
-  ```
-- **Lint Check (CI Non-Zero Exit):**
-  ```bash
-  npm run lint:check
-  ```
-- **Code Formatting:**
-  ```bash
-  npm run format
-  ```
-
-### Pre-Commit Hooks (Husky & lint-staged)
-
-Husky automatically executes `.husky/pre-commit` on every `git commit`. It invokes `lint-staged`, which runs:
-
-1. `eslint --fix` on staged `.ts` files.
-2. `prettier --write` on staged `.ts` files.
-
----
-
-## 🧪 Testing
-
-The repository contains unit test suites and end-to-end integration test suites.
-
-### Run Unit Tests
-
-```bash
-npm run test
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "errorCode": "VALIDATION_ERROR",
+  "message": "Validation failed.",
+  "timestamp": "2026-07-28T10:00:00.000Z",
+  "path": "/api/v1/audit",
+  "requestId": "assessment-demo-001",
+  "fieldErrors": [
+    {
+      "field": "url",
+      "messages": ["url must be a valid URL"]
+    }
+  ]
+}
 ```
 
-### Run Unit Tests in Watch Mode
+When a rate limit is exceeded, the API returns `429` with `errorCode: "RATE_LIMIT_EXCEEDED"`. A timed-out audit returns `504` with `errorCode: "AUDIT_TIMEOUT"`.
+
+## Caching Flow
+
+1. Page Pulse normalizes the submitted URL and derives a cache key.
+2. It checks Redis before entering the audit queue.
+3. On a cache hit, it returns the stored successful audit immediately with `data.cached: true`; no network call or database write occurs.
+4. On a cache miss, it queues the audit, fetches and parses the page, persists the result, and stores the successful response in Redis for `CACHE_TTL` seconds.
+
+## Audit Flow
+
+1. `RequestIdMiddleware` accepts or generates a request ID and sets `X-Request-ID`.
+2. The global throttler applies the per-IP limit (except health and Swagger).
+3. The validation pipe validates and transforms the request DTO.
+4. `AuditService` emits an `Audit Started` event and checks the Redis cache.
+5. A cache miss is submitted to the bounded concurrency queue.
+6. The service creates a pending PostgreSQL record, fetches the URL, and measures the response.
+7. HTML metadata is extracted and the database record is updated to `COMPLETED`, or failure details are persisted.
+8. Successful results are cached; timeout and queue failures map to safe HTTP errors.
+9. `LoggingInterceptor` records method, URL, response status, elapsed time, client IP, user agent, and request ID.
+10. `GlobalExceptionFilter` provides the standardized error format and logs detailed failure context internally.
+
+## Testing
+
+The test suite uses Jest and Nest's `TestingModule`. External services and outbound URLs are mocked in unit tests. The E2E suite boots the application and verifies the health endpoint, including request ID behavior.
 
 ```bash
+# Unit tests
+npm test -- --runInBand
+
+# Watch mode
 npm run test:watch
-```
 
-### Generate Test Coverage Report
+# End-to-end/integration tests
+npm run test:e2e -- --runInBand
 
-```bash
-npm run test:cov
-```
+# Coverage report
+npm run test:cov -- --runInBand
 
-### Run End-to-End (E2E) Integration Tests
-
-```bash
-npm run test:e2e
-```
-
-**Current Verification Status:**
-
-- Unit Test Suites: **10 passed** (18 tests total)
-- E2E Test Suites: **1 passed** (`GET /api/v1/health` returning HTTP 200 OK)
-
----
-
-## 🚢 Deployment
-
-### Production Compilation
-
-Execute the TypeScript compiler build:
-
-```bash
+# Lint and build
+npm run lint:check
 npm run build
 ```
 
-This outputs production-ready JavaScript bundles to the `./dist` directory.
+Coverage output is written to `coverage/`. The project enforces a global statement coverage threshold of 80%.
 
-### Production Container Deployment
+## CI Pipeline
 
-Build the production multi-stage target:
+GitHub Actions runs on every push and pull request through [`.github/workflows/ci.yml`](.github/workflows/ci.yml). The workflow:
 
-```bash
-docker build --target production -t page-pulse:latest .
-docker run -p 3000:3000 --env-file .env page-pulse:latest
-```
+1. Checks out the repository and sets up Node.js 20.
+2. Restores/caches npm dependencies and runs `npm ci`.
+3. Starts isolated PostgreSQL and Redis service containers.
+4. Supplies CI-only database and Redis configuration through workflow environment variables; it does not read a developer's local `.env` file.
+5. Runs ESLint, unit tests, E2E tests, coverage generation, and the production build.
+6. Uploads the coverage directory as a workflow artifact, even if an earlier test step fails.
 
-### Production Checklist
+Any failed quality gate fails the workflow.
 
-1. Ensure `NODE_ENV=production` is set in environment variables.
-2. Set strong passwords for `DATABASE_PASSWORD`.
-3. Set `LOG_LEVEL=info` or `warn` to eliminate verbose debug log I/O.
-4. Verify database schema migrations have been run prior to starting the application process (`synchronize: false` is enforced).
+## Future Improvements
 
----
+- Database migrations and a migration deployment strategy
+- Authentication/authorization for protected audit usage
+- OpenTelemetry tracing and centralized structured-log ingestion
+- Redis-backed distributed rate limiting for multi-instance deployments
+- Background-job workers and durable queue storage
+- URL allow/deny policies and SSRF protection for outbound requests
+- Health checks for PostgreSQL and Redis dependencies
+- Metrics, dashboards, alerting, and SLOs
+- Containerization and deployment manifests
 
-## 🔮 Future Phases
+## License
 
-- **Phase 2 — Authentication & Security:** JWT authentication, Refresh Token rotation, Password hashing (Argon2id/Bcrypt), Role-Based Access Control (RBAC) guards.
-- **Phase 3 — Audit Logging Engine:** Audit event interceptors, database persistence models, search & filtering query repositories.
-- **Phase 4 — Page Monitoring & Analytics:** Webpage health probes, response timing metrics, uptime monitoring workers.
-- **Phase 5 — Webhooks & Alert Notifications:** Outbound webhook dispatchers, exponential backoff retry queues, Email/Slack notifications.
-- **Phase 6 — Observability & CI/CD:** Prometheus metric exports, Grafana dashboards, GitHub Actions CI/CD pipelines.
-
----
-
-## 📄 License
-
-UNLICENSED — Page Pulse Internal Project. All rights reserved.
+MIT
